@@ -1,3 +1,9 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>html{-webkit-text-size-adjust:100%}body{margin:0;font-size:14px}[hidden]{display:none!important}img{max-width:100%}</style>
 <title>Blinkit SOH Tracker</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -136,6 +142,8 @@ details.month .inner{padding:12px 14px;display:flex;flex-direction:column;gap:10
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
+</head>
+<body>
 <div class="app">
   <nav class="rail" aria-label="Main">
     <div class="brand"><span class="logo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg></span><span>Blinkit<br>SOH Tracker</span></div>
@@ -205,9 +213,10 @@ const Store = {
     });
   },
   async all(store) { if (!this.ok) return [...this.mem[store].values()]; return this.tx(store, 'readonly', s => s.getAll()); },
-  async put(store, val, key) { this.mem[store].set(store === 'kv' ? key : val.id, val); if (this.ok) { try { await this.tx(store, 'readwrite', s => store === 'kv' ? s.put(val, key) : s.put(val)); } catch (e) { this.ok = false; toast('Storage write failed. Data will not persist after refresh.'); } } },
-  async del(store, id) { this.mem[store].delete(id); if (this.ok) await this.tx(store, 'readwrite', s => s.delete(id)); },
-  async clear(store) { this.mem[store].clear(); if (this.ok) await this.tx(store, 'readwrite', s => s.clear()); },
+  draftRoute(store, key) { return S.mode === 'published' && (store === 'snaps' || store === 'sales' || (store === 'kv' && (key === 'skumap' || key === 'settings'))); },
+  async put(store, val, key) { if (this.draftRoute(store, key)) { if (S.admin) saveDraft(); return; } this.mem[store].set(store === 'kv' ? key : val.id, val); if (this.ok) { try { await this.tx(store, 'readwrite', s => store === 'kv' ? s.put(val, key) : s.put(val)); } catch (e) { this.ok = false; toast('Storage write failed. Data will not persist after refresh.'); } } },
+  async del(store, id) { if (this.draftRoute(store)) { if (S.admin) saveDraft(); return; } this.mem[store].delete(id); if (this.ok) await this.tx(store, 'readwrite', s => s.delete(id)); },
+  async clear(store) { if (this.draftRoute(store)) { if (S.admin) saveDraft(); return; } this.mem[store].clear(); if (this.ok) await this.tx(store, 'readwrite', s => s.clear()); },
   async getKv(key) { if (!this.ok) return this.mem.kv.get(key); return this.tx('kv', 'readonly', s => s.get(key)); }
 };
 
@@ -390,7 +399,7 @@ function summarize(rows) {
   return { skus: ids.size, whs: whs.size, lines: rows.length, sel, uns, oos };
 }
 async function saveSnapshot(date, parsed) {
-  const rows = parsed.rows, snap = { id: uid(), date, uploadedAt: Date.now(), filename: parsed.filename, rows, meta: summarize(rows) };
+  const rows = parsed.rows, snap = { id: uid(), date, uploadedAt: Date.now(), filename: parsed.filename, rows, hash: rowsHash(rows), meta: summarize(rows) };
   S.snaps.push(snap); await Store.put('snaps', snap); return snap;
 }
 
@@ -560,12 +569,12 @@ const ICON = {
 const TABS = [['dashboard', 'Dashboard'], ['top-sellers', 'Top sellers'], ['warehouses', 'Warehouses'], ['upload', 'Upload'], ['history', 'History'], ['compare', 'Compare'], ['planning', 'Planning']];
 function renderNav() {
   $('#nav').innerHTML = TABS.map(([k, l]) => `<a href="#${k}" ${S.ui.tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[k]}</svg><span>${l}</span></a>`).join('');
-  $('#railnote').textContent = Store.ok ? 'Saved in this browser (IndexedDB).' : 'Storage unavailable: data will be lost on refresh.';
+  $('#railnote').textContent = S.mode === 'published' ? (S.admin ? 'Admin · edits are a draft until you publish.' : 'Read-only · showing published data.') : (Store.ok ? 'Saved in this browser (IndexedDB).' : 'Storage unavailable: data will be lost on refresh.');
 }
 function renderTop() {
   const s = activeSnap(), t = { dashboard: 'Inventory dashboard', 'top-sellers': 'Top-selling SKUs', warehouses: 'Warehouse status', upload: 'Upload data', history: 'History by month and date', compare: 'Compare stock', planning: 'Replenishment planning' }[S.ui.tab];
   $('#topband').innerHTML = `<div><h1>${t}</h1><small>${s ? `Stock on hand as of ${dateLabel(s.date)} · uploaded ${new Date(s.uploadedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ${esc(s.filename)}` : 'No inventory uploaded yet'}</small></div>
-  <div class="rowflex">${shutCount() && S.ui.tab !== 'warehouses' ? `<button class="btn sm" data-act="toggle-shut" title="Toggle shutdown warehouses in the numbers">${shutCount()} shutdown · ${S.settings.includeShut ? 'included' : 'excluded'}</button>` : ''}<a class="btn primary" href="#upload">Upload today's sheet</a></div>`;
+  <div class="rowflex">${shutCount() && S.ui.tab !== 'warehouses' ? `<button class="btn sm" data-act="toggle-shut" title="Toggle shutdown warehouses in the numbers">${shutCount()} shutdown · ${S.settings.includeShut ? 'included' : 'excluded'}</button>` : ''}${modeChips()}<a class="btn primary" href="#upload">${canEdit() ? "Upload today's sheet" : 'Admin sign-in'}</a></div>`;
 }
 
 /* ---------- charts ---------- */
@@ -701,6 +710,7 @@ function previewHtml(kind) {
     if (p.fmt === 'period' && !u.date) { extra += '<div class="note crit">Select the "as of" date for these period totals.</div>'; blocked = true; }
   }
   if (!st.valid) blocked = true;
+  if (isInv && u.date) { const rv = reviewInv(p, u.date, u); extra += rv.html; if (rv.major && !u.ack) blocked = true; }
   const lim = 80, shown = p.issues.slice(0, lim);
   return `<div class="stack">
     <div class="rowflex"><b>${esc(u.file)}</b><span class="chip">${esc(p.sheetName || '')}</span>${p.fmt ? `<span class="chip b">${p.fmt === 'daily' ? 'Daily sales rows' : 'Period totals'}</span>` : ''}</div>
@@ -717,6 +727,7 @@ function previewHtml(kind) {
 }
 const dropHtml = (kind, title) => `<label class="drop" id="drop-${kind}" for="file-${kind}"><input id="file-${kind}" data-file="${kind}" type="file" accept=".xlsx,.xls,.csv"><strong>${title}</strong><span>Drop an Excel or CSV file here, or tap to choose</span></label>`;
 function viewUpload() {
+  if (!canEdit()) return lockedHtml();
   const inv = S.up.inv, sal = S.up.sales, hist = snapsSorted().slice(-6).reverse();
   return `<div class="grid cols2">
   <div class="card"><header><div><h3>1 · Daily inventory sheet</h3><p>Each upload is saved as its own snapshot. Earlier days are never overwritten.</p></div></header>
@@ -745,10 +756,11 @@ function viewUpload() {
     <label class="btn" for="file-restore" style="cursor:pointer">Restore backup<input id="file-restore" data-file="restore" type="file" accept=".json" style="display:none"></label>
     <button class="btn danger" id="wipe" data-act="wipe">Erase all data</button></div>
     <p class="sub">${fmt(S.snaps.length)} inventory snapshots · ${fmt(S.sales.length)} sales uploads</p>
-  </div></div>`;
+  </div></div>
+  ${adminCards()}`;
 }
 async function handleFile(kind, file) {
-  if (!file) return;
+  if (!file || !canEdit()) return;
   const prevU = S.up[kind], u = S.up[kind] = { file: file.name, busy: true, touched: !!prevU?.touched, date: prevU?.date || (kind === 'inv' ? todayStr() : '') };
   render();
   try {
@@ -763,13 +775,13 @@ async function handleFile(kind, file) {
 async function saveUpload(kind) {
   const u = S.up[kind]; if (!u?.parsed || u.parsed.fatal) return; const p = u.parsed;
   if (kind === 'inv') {
-    if (!u.date) return; const snap = await saveSnapshot(u.date, p); S.ui.snapId = snap.id; S.up.inv = null;
+    if (!u.date || !canEdit()) return; if (reviewInv(p, u.date, u).major && !u.ack) return; const snap = await saveSnapshot(u.date, p); logAct(`Saved inventory ${u.date}: ${p.rows.length} rows from ${p.filename}`); S.ui.snapId = snap.id; S.up.inv = null;
     toast(`Saved ${fmt(p.rows.length)} rows for ${dateLabel(u.date)}`); location.hash = '#dashboard';
   } else if (kind === 'map') {
-    await saveMapping(p); S.up.map = null; toast(`Saved ${fmt(p.rows.length)} SKU mappings`);
+    await saveMapping(p); logAct(`Saved SKU mapping: ${p.rows.length} rows from ${p.filename}`); S.up.map = null; toast(`Saved ${fmt(p.rows.length)} SKU mappings`);
   } else {
     const rec = { id: uid(), uploadedAt: Date.now(), filename: p.filename, fmt: p.fmt, rows: p.rows, asOf: u.date, minD: p.stats.minD, maxD: p.stats.maxD };
-    S.sales.push(rec); await Store.put('sales', rec); buildSalesIdx(); S.up.sales = null; toast(`Saved ${fmt(p.rows.length)} sales rows`);
+    S.sales.push(rec); await Store.put('sales', rec); logAct(`Saved sales data: ${p.rows.length} rows from ${p.filename}`); buildSalesIdx(); S.up.sales = null; toast(`Saved ${fmt(p.rows.length)} sales rows`);
   }
   render();
 }
@@ -805,7 +817,7 @@ function viewHistory() {
       <div class="inner"><div class="rowflex"><button class="btn sm" data-act="exp-month" data-m="${m}">Month report (Excel)</button></div>
       <div class="tablewrap"><table><thead><tr><th class="nosort">Date</th><th class="nosort">File</th><th class="nosort r">SKUs</th><th class="nosort r">Stock</th><th class="nosort r">Out of stock</th><th class="nosort">Uploaded</th><th class="nosort">Actions</th></tr></thead><tbody>
       ${allS.map(x => `<tr><td><b>${dateLabel(x.date)}</b>${versionsOn(x.date)[0].id !== x.id ? ' <span class="chip y">older version</span>' : ''}</td><td class="wrap">${esc(x.filename)}</td><td class="r">${fmt(metaOf(x).skus)}</td><td class="r">${fmt(metaOf(x).sel)}</td><td class="r">${fmt(metaOf(x).oos)}</td><td>${new Date(x.uploadedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
-      <td><div class="rowflex"><button class="btn sm" data-act="open-snap" data-id="${x.id}">Open</button><button class="btn sm" data-act="exp-snap" data-id="${x.id}" data-v="csv">CSV</button><button class="btn sm" data-act="exp-snap" data-id="${x.id}" data-v="xlsx">Excel</button><button class="btn sm danger" data-act="del-snap" data-id="${x.id}">Delete</button></div></td></tr>`).join('')}
+      <td><div class="rowflex"><button class="btn sm" data-act="open-snap" data-id="${x.id}">Open</button><button class="btn sm" data-act="exp-snap" data-id="${x.id}" data-v="csv">CSV</button><button class="btn sm" data-act="exp-snap" data-id="${x.id}" data-v="xlsx">Excel</button>${canEdit() ? `<button class="btn sm danger" data-act="del-snap" data-id="${x.id}">Delete</button>` : ''}</div></td></tr>`).join('')}
       </tbody></table></div></div></details>`;
   }).join('')}</div></div>`;
 }
@@ -1104,7 +1116,7 @@ function viewWarehouses() {
   const q = f.q.toLowerCase(), rows = all.filter(w => (!q || (w.name + ' ' + w.id).toLowerCase().includes(q)) && (!f.status || w.st === f.status));
   const shut = all.filter(w => w.st === 'shutdown' && isShut(w.id, snap.date)), act = all.length - all.filter(w => w.st === 'shutdown').length;
   const stranded = shut.reduce((s, w) => s + w.s.sel, 0), incShut = shut.reduce((s, w) => s + w.s.inc, 0), demShut = shut.reduce((s, w) => s + w.s.sold, 0) / W;
-  const nsel = Object.keys(f.sel).filter(k => f.sel[k]).length;
+  const ro = !canEdit(), nsel = Object.keys(f.sel).filter(k => f.sel[k]).length;
   return `
   <div class="grid kpis">
     <div class="kpi"><span class="l">Active warehouses</span><span class="v num">${act}</span><span class="s">of ${all.length} seen in uploads</span></div>
@@ -1114,19 +1126,19 @@ function viewWarehouses() {
     <div class="kpi"><span class="l">Sales at shutdown sites</span><span class="v num">${fmt1(demShut)}</span><span class="s">units/day over last ${W}d, now to be served elsewhere</span></div>
   </div>
   ${incShut ? `<div class="note warn"><span><b>${fmt(incShut)} units are still scheduled to arrive at shutdown warehouses.</b> They are excluded from planning while shutdown sites are hidden.</span></div>` : ''}
-  <div class="card"><header><div><h3>Warehouse status</h3><p>Mark each warehouse Active or Shutdown. Shutdown sites are removed from stock totals, alerts, top sellers, planning and comparisons. Their stock is shown separately above.</p></div></header>
+  <div class="card"><header><div><h3>Warehouse status</h3><p>${ro ? 'Status is set by the admin.' : 'Mark each warehouse Active or Shutdown.'} Shutdown sites are removed from stock totals, alerts, top sellers, planning and comparisons. Their stock is shown separately above.</p></div></header>
     <div class="filters" style="align-items:end">
       <div class="field"><label for="w-q">Search warehouse</label><input id="w-q" type="search" data-w="q" value="${esc(f.q)}" placeholder="Name or ID"></div>
       <div class="field"><label>Show</label><div class="seg">${[['', 'All'], ['active', 'Active'], ['shutdown', 'Shutdown']].map(([k, l]) => `<button data-act="wh-filter" data-v="${k}" aria-pressed="${f.status === k}">${l}</button>`).join('')}</div></div>
       <div class="field"><label>Analysis</label><div class="seg"><button data-act="toggle-shut" data-v="0" aria-pressed="${!S.settings.includeShut}">Hide shutdown</button><button data-act="toggle-shut" data-v="1" aria-pressed="${!!S.settings.includeShut}">Include shutdown</button></div></div>
     </div>
-    <div class="rowflex" style="margin-bottom:10px"><span class="sub">${nsel} selected</span><button class="btn sm" data-act="wh-bulk" data-v="shutdown" ${nsel ? '' : 'disabled'}>Mark selected as shutdown</button><button class="btn sm" data-act="wh-bulk" data-v="active" ${nsel ? '' : 'disabled'}>Mark selected as active</button><button class="btn sm" data-act="wh-selall">${rows.every(w => f.sel[w.id]) && rows.length ? 'Clear selection' : 'Select shown'}</button><button class="btn sm danger" data-act="wh-reset">Set all active</button></div>
+    ${ro ? '' : `<div class="rowflex" style="margin-bottom:10px"><span class="sub">${nsel} selected</span><button class="btn sm" data-act="wh-bulk" data-v="shutdown" ${nsel ? '' : 'disabled'}>Mark selected as shutdown</button><button class="btn sm" data-act="wh-bulk" data-v="active" ${nsel ? '' : 'disabled'}>Mark selected as active</button><button class="btn sm" data-act="wh-selall">${rows.every(w => f.sel[w.id]) && rows.length ? 'Clear selection' : 'Select shown'}</button><button class="btn sm danger" data-act="wh-reset">Set all active</button></div>`}
     <div class="tablewrap"><table><thead><tr><th class="nosort"></th><th class="nosort">Warehouse</th><th class="nosort">Status</th><th class="nosort">Shutdown from</th><th class="nosort">Note</th><th class="nosort r">SOH</th><th class="nosort r">Incoming</th><th class="nosort r">SKUs in stock</th><th class="nosort r">Sold ${W}d</th></tr></thead><tbody>
-    ${rows.map(w => `<tr><td><input type="checkbox" aria-label="Select ${esc(w.name)}" data-wsel="${esc(w.id)}" ${f.sel[w.id] ? 'checked' : ''}></td>
+    ${rows.map(w => `<tr><td>${ro ? '' : `<input type="checkbox" aria-label="Select ${esc(w.name)}" data-wsel="${esc(w.id)}" ${f.sel[w.id] ? 'checked' : ''}>`}</td>
       <td class="wrap"><b>${esc(w.name)}</b><div class="sub">ID ${esc(w.id)}${w.in ? '' : ' · not in latest sheet'}</div></td>
-      <td><div class="seg nw"><button data-act="wh-set" data-id="${esc(w.id)}" data-v="active" aria-pressed="${w.st === 'active'}">Active</button><button data-act="wh-set" data-id="${esc(w.id)}" data-v="shutdown" aria-pressed="${w.st === 'shutdown'}" ${w.st === 'shutdown' ? 'style="background:var(--crit);color:#fff"' : ''}>Shutdown</button></div></td>
-      <td>${w.st === 'shutdown' ? `<input type="date" aria-label="Shutdown from date for ${esc(w.name)}" data-whdate="${esc(w.id)}" value="${esc(w.since)}" style="min-height:32px;border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:2px 6px">${w.since ? '' : '<div class="sub">all dates</div>'}` : '<span class="sub">–</span>'}</td>
-      <td>${w.st === 'shutdown' ? `<input type="text" aria-label="Note for ${esc(w.name)}" data-whnote="${esc(w.id)}" value="${esc(w.note)}" placeholder="Optional" maxlength="80" style="min-height:32px;width:150px;border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:2px 8px">` : ''}</td>
+      <td>${ro ? (w.st === 'shutdown' ? '<span class="chip r">Shutdown</span>' : '<span class="chip g">Active</span>') : `<div class="seg nw"><button data-act="wh-set" data-id="${esc(w.id)}" data-v="active" aria-pressed="${w.st === 'active'}">Active</button><button data-act="wh-set" data-id="${esc(w.id)}" data-v="shutdown" aria-pressed="${w.st === 'shutdown'}" ${w.st === 'shutdown' ? 'style="background:var(--crit);color:#fff"' : ''}>Shutdown</button></div>`}</td>
+      <td>${ro ? (w.st === 'shutdown' ? (w.since ? dateLabel(w.since) : 'All dates') : '–') : w.st === 'shutdown' ? `<input type="date" aria-label="Shutdown from date for ${esc(w.name)}" data-whdate="${esc(w.id)}" value="${esc(w.since)}" style="min-height:32px;border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:2px 6px">${w.since ? '' : '<div class="sub">all dates</div>'}` : '<span class="sub">–</span>'}</td>
+      <td>${ro ? esc(w.note) : w.st === 'shutdown' ? `<input type="text" aria-label="Note for ${esc(w.name)}" data-whnote="${esc(w.id)}" value="${esc(w.note)}" placeholder="Optional" maxlength="80" style="min-height:32px;width:150px;border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:2px 8px">` : ''}</td>
       <td class="r"><b>${fmt(w.s.sel)}</b></td><td class="r">${w.s.inc ? `<span class="chip b">${fmt(w.s.inc)}</span>` : '0'}</td><td class="r">${fmt(w.s.skus)}</td><td class="r">${w.in ? fmt(w.s.sold) : '–'}</td></tr>`).join('') || `<tr><td colspan="9"><div class="empty"><b>No warehouses match</b></div></td></tr>`}
     </tbody></table></div>
     <p class="sub" style="margin-top:10px">"Shutdown from" decides which uploads are affected: snapshots dated on or after that day. Earlier history stays as it was. Marking a site shutdown sets this to the latest snapshot date (${dateLabel(dateList()[0])}). Clear the date to apply it to all dates. Figures in this table are for the ${dateLabel(snap.date)} snapshot, before any exclusion.</p>
@@ -1134,6 +1146,7 @@ function viewWarehouses() {
 }
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b) return; const a = b.dataset.act, f = WF(), ws = whStatusMap();
+  if (['wh-set', 'wh-bulk', 'wh-reset'].includes(a) && !canEdit()) { toast('Admin sign-in required'); return; }
   if (a === 'toggle-shut') { S.settings.includeShut = b.dataset.v ? b.dataset.v === '1' : !S.settings.includeShut; whChanged(); }
   else if (a === 'wh-filter') { f.status = b.dataset.v; render(); }
   else if (a === 'wh-set') setWh([b.dataset.id], b.dataset.v);
@@ -1143,6 +1156,7 @@ document.addEventListener('click', e => {
 });
 function setWh(ids, status) {
   const ws = whStatusMap(), first = dateList()[0] || '';
+  logAct(`Marked ${ids.length} warehouse${ids.length > 1 ? 's' : ''} as ${status}`);
   for (const id of ids) {
     if (status === 'active') delete ws[id]; else ws[id] = { ...(ws[id] || {}), status: 'shutdown', since: ws[id]?.status === 'shutdown' ? ws[id].since : first };
   }
@@ -1150,6 +1164,7 @@ function setWh(ids, status) {
 }
 document.addEventListener('change', e => {
   const t = e.target;
+  if ((t.dataset.whdate || t.dataset.whnote) && !canEdit()) return;
   if (t.dataset.wsel != null && t.dataset.wsel !== '') { WF().sel[t.dataset.wsel] = t.checked; render(); }
   else if (t.dataset.whdate) { const s = whStatusMap()[t.dataset.whdate]; if (s) { s.since = t.value; whChanged(); } }
   else if (t.dataset.whnote) { const s = whStatusMap()[t.dataset.whnote]; if (s) { s.note = t.value; saveSettings(); } }
@@ -1181,6 +1196,7 @@ const lvlName = l => l === 'sku' ? 'sku' : l === 'wh' ? 'warehouse' : 'sku-wareh
 function armed(btn, label) { if (btn.dataset.armed) return true; btn.dataset.armed = '1'; btn.dataset.orig = btn.textContent; btn.textContent = label; btn.classList.add('armed'); setTimeout(() => { if (btn.isConnected) { btn.textContent = btn.dataset.orig; btn.classList.remove('armed'); delete btn.dataset.armed; } }, 4000); return false; }
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-act]'); if (!b) return; const act = b.dataset.act, v = b.dataset.v, id = b.dataset.id, df = DF();
+  if (MUT.has(act) && !canEdit()) { toast('Admin sign-in required'); return; }
   const snap = activeSnap();
   switch (act) {
     case 'snapdate': break;
@@ -1192,7 +1208,7 @@ document.addEventListener('click', async e => {
     case 'issues-csv': { const p = S.up[b.dataset.k].parsed; await saveFile('validation-issues.csv', toCsv(['Row', 'Level', 'Field', 'Issue'], p.issues.map(i => [i.row, i.sev, i.field, i.msg]))); break; }
     case 'tpl': await saveFile(b.dataset.k === 'inv' ? 'inventory-template.csv' : 'sales-template.csv', templateCsv(b.dataset.k)); break;
     case 'del-sales': if (!armed(b, 'Confirm remove?')) return; S.sales = S.sales.filter(s => s.id !== id); await Store.del('sales', id); buildSalesIdx(); toast('Sales upload removed'); render(); break;
-    case 'del-snap': if (!armed(b, 'Confirm delete?')) return; S.snaps = S.snaps.filter(s => s.id !== id); await Store.del('snaps', id); if (S.ui.snapId === id) S.ui.snapId = null; toast('Snapshot deleted'); render(); break;
+    case 'del-snap': { if (!armed(b, 'Confirm delete?')) return; const gone = snapById(id); S.snaps = S.snaps.filter(s => s.id !== id); await Store.del('snaps', id); if (gone) { S.trash.unshift(gone); S.trash = S.trash.slice(0, 15); await Store.put('kv', S.trash, 'trash'); logAct(`Deleted snapshot ${gone.date} (${gone.filename})`); } if (S.ui.snapId === id) S.ui.snapId = null; toast('Snapshot moved to the recycle bin on the Upload page'); render(); break; }
     case 'open-snap': S.ui.snapId = id; location.hash = '#dashboard'; break;
     case 'exp-snap': { const s = snapById(id); if (v === 'csv') await saveFile(`inventory-${s.date}.csv`, toCsv(INV_HEAD, s.rows.map(r => invRow(s.date, r)))); else await saveFile(`inventory-${s.date}.xlsx`, toXlsx(snapSheets(s))); break; }
     case 'exp-month': { const m = b.dataset.m, ms = monthSummary(m);
@@ -1220,12 +1236,12 @@ document.addEventListener('click', async e => {
       if (v === 'csv') await saveFile(`top-sellers-${snap.date}.csv`, toCsv(head, rows)); else await saveFile(`top-sellers-${snap.date}.xlsx`, toXlsx({ 'Top SKUs': [head, ...rows], 'By warehouse': [['Product', 'UPC', 'Merchant SKU', 'Warehouse', 'SOH', 'Incoming scheduled', `Sold ${W}d`], ...d.rows.flatMap(r => d.wh.filter(x => x.id === r.id).map(x => [x.nm, x.upc, mskuOf(x), x.wn, x.sel, x.inc, x.dUnits]))] })); break; }
     case 'pstat': PF().status = PF().status === v ? '' : v; ts('plan').page = 0; render(); break;
     case 'plevel': PF().level = v; PF().wh = ''; ts('plan').page = 0; render(); break;
-    case 'reset-set': S.settings = { ...DEFAULTS, overrides: {}, whStatus: S.settings.whStatus, includeShut: S.settings.includeShut }; saveSettings(); buildSalesIdx(); toast('Assumptions reset'); render(); break;
+    case 'reset-set': S.settings = { ...DEFAULTS, ...(S.published?.settings || {}), overrides: {}, whStatus: S.settings.whStatus, includeShut: S.settings.includeShut }; saveSettings(); buildSalesIdx(); toast('Assumptions reset'); render(); break;
     case 'exp-plan': { const f = PF(), rows = enrich(aggregate(rowsOf(snap), f.level), f.level), st = S.settings;
       await exportTable(`replenishment-plan-${snap.date}`, ['SKU', 'Product', 'Warehouse', 'Stock', 'Incoming', `Avg daily sales (${st.windowDays}d)`, 'Demand source', 'Days of stock', 'Lead time (d)', 'Safety (d)', 'Reorder point', 'Target stock', 'Suggested order', 'Status'],
         rows.map(r => [r.id, r.nm, f.level === 'skuwh' ? r.wn : 'All', r.sel, r.inc, r.dem == null ? 'No data' : Math.round(r.dem * 100) / 100, r.demSrc, r.days == null ? 'No data' : r.days === Infinity ? 'No sales' : Math.round(r.days * 10) / 10, r.lead, r.safe, r.rop ?? '', r.target ?? '', r.sugg ?? 'No data', STAT[r.pstat][0]]), v); break; }
     case 'backup': await saveFile(`soh-backup-${todayStr()}.json`, JSON.stringify({ app: 'soh-tracker', v: 1, snaps: S.snaps, sales: S.sales, settings: S.settings })); break;
-    case 'wipe': if (!armed(b, 'Confirm erase everything?')) return; await Store.clear('snaps'); await Store.clear('sales'); S.snaps = []; S.sales = []; S.ui.snapId = null; await Store.put('kv', true, 'seeded'); buildSalesIdx(); toast('All data erased'); render(); break;
+    case 'wipe': if (!armed(b, 'Confirm erase everything?')) return; S.snaps = []; S.sales = []; S.map = null; S.ui.snapId = null; await Store.clear('snaps'); await Store.clear('sales'); await Store.put('kv', null, 'skumap'); await Store.put('kv', true, 'seeded'); buildSalesIdx(); buildMapIdx(); logAct('Erased all data'); toast('All data erased'); render(); break;
   }
 });
 
@@ -1240,6 +1256,7 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('change', async e => {
   const t = e.target, d = t.dataset;
+  if ((d.file || d.upDate) && !canEdit()) return;
   if (d.act === 'snapdate') { S.ui.snapId = snapForDate(t.value).id; render(); }
   else if (d.act === 'snapver') { S.ui.snapId = t.value; render(); }
   else if (d.f && d.f !== 'q' && d.f !== 'sku') { DF()[d.f] = t.value; ts('dash').page = 0; render(); }
@@ -1268,21 +1285,165 @@ async function restore(file) {
   } catch (e) { toast('Restore failed: ' + e.message); }
 }
 
-/* ---------- boot ---------- */
+
+/* ---------- access control, publishing, safeguards, boot ---------- */
+S.mode = 'local'; S.admin = false; S.trash = []; S.log = []; S.published = null; S.dirty = false; S.localHash = null;
+const canEdit = () => S.mode !== 'published' || S.admin;
+const MUT = new Set(['up-save', 'del-sales', 'del-snap', 'clear-map', 'wipe', 'restore-snap', 'purge-snap', 'set-pass', 'publish', 'discard-draft']);
+const PLAN_KEYS = ['windowDays', 'lead', 'safe', 'review', 'excess', 'slowMax30', 'lowUnits', 'inclInc', 'roundTo', 'source', 'overrides', 'whStatus'];
+
+/* pack / unpack for compact files */
+const packRow = r => [r.id, r.nm, r.br, r.upc, r.uom, r.wid, r.wn, r.cat, r.sel, r.inc, r.uns, r.dmg, r.lost, r.exp, r.nex, r.s7, r.s15, r.s30];
+const unpackRow = a => ({ id: String(a[0]), nm: a[1], br: a[2], upc: a[3], uom: a[4], wid: String(a[5]), wn: a[6], cat: a[7], sel: a[8], inc: a[9], uns: a[10], dmg: a[11], lost: a[12], exp: a[13], nex: a[14], s7: a[15], s15: a[16], s30: a[17] });
+const packSnap = s => ({ id: s.id, date: s.date, uploadedAt: s.uploadedAt, filename: s.filename, hash: s.hash, rows: s.rows.map(packRow) });
+const unpackSnap = s => { const rows = s.rows.map(unpackRow); return { id: s.id, date: s.date, uploadedAt: s.uploadedAt, filename: s.filename, hash: s.hash, rows, meta: summarize(rows) }; };
+function rowsHash(rows) { let h = 5381; const s = rows.map(r => `${r.id}|${r.wid}|${r.sel}|${r.inc}`).join(';'); for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return rows.length + ':' + (h >>> 0).toString(36); }
+
+/* activity log */
+function logAct(msg) { S.log.unshift({ t: Date.now(), msg }); S.log = S.log.slice(0, 200); Store.put('kv', S.log, 'log'); }
+
+/* passcode hashing (PBKDF2, slows down guessing; it is a soft lock, see the notes on the page) */
+const hex = b => [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+async function derive(pass, saltHex, iter) {
+  const salt = new Uint8Array(saltHex.match(/../g).map(h => parseInt(h, 16)));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveBits']);
+  return hex(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: iter, hash: 'SHA-256' }, key, 256));
+}
+async function makeAdminHash(pass) { const salt = hex(crypto.getRandomValues(new Uint8Array(16))), iter = 150000; return { salt, iter, hash: await derive(pass, salt, iter) }; }
+const adminHashNow = () => S.mode === 'published' ? S.published.adminHash : S.localHash;
+
+/* published data (read-only for visitors) */
+function loadBase() {
+  const b = S.published;
+  S.snaps = (b.snaps || []).map(unpackSnap); S.sales = b.sales || []; S.map = b.map || null;
+  S.settings = { ...DEFAULTS, ...(b.settings || {}), overrides: { ...(b.settings?.overrides || {}) }, whStatus: { ...(b.settings?.whStatus || {}) }, includeShut: false };
+  S.ui.snapId = null; S.dirty = false; S.whVer++; metaCache.clear(); buildMapIdx(); buildSalesIdx();
+}
+async function tryDraft() {
+  const d = await Store.getKv('draft');
+  if (d && d.base === S.published.publishedAt) {
+    S.snaps = d.snaps.map(unpackSnap); S.sales = d.sales || []; S.map = d.map || null;
+    S.settings = { ...DEFAULTS, ...d.settings, overrides: { ...(d.settings?.overrides || {}) }, whStatus: { ...(d.settings?.whStatus || {}) } };
+    S.dirty = true; S.whVer++; metaCache.clear(); buildMapIdx(); buildSalesIdx();
+  }
+}
+const saveDraft = debounce(async () => {
+  if (S.mode !== 'published' || !S.admin) return; S.dirty = true;
+  try { await Store.put('kv', { base: S.published.publishedAt, savedAt: Date.now(), snaps: S.snaps.map(packSnap), sales: S.sales, map: S.map, settings: S.settings }, 'draft'); } catch (e) { }
+  renderTop();
+}, 300);
+async function adminLogin(pass) {
+  const ah = adminHashNow(); if (!ah) return 'No admin passcode has been set for this site.';
+  if (!(window.crypto && crypto.subtle)) return 'This browser cannot check passcodes here. Open the site over https.';
+  const h = await derive(pass, ah.salt, ah.iter); if (h !== ah.hash) return 'That passcode is not correct.';
+  S.admin = true; try { sessionStorage.setItem('soh-admin', '1'); } catch (e) { }
+  if (S.mode === 'published') { loadBase(); await tryDraft(); }
+  logAct('Admin signed in'); return '';
+}
+function adminLogout() { S.admin = false; try { sessionStorage.removeItem('soh-admin'); } catch (e) { } if (S.mode === 'published') loadBase(); S.up = { inv: null, sales: null }; toast('Signed out'); render(); }
+
+/* wrong-file review for inventory uploads */
+function reviewInv(p, date, u) {
+  const cur = summarize(p.rows), flags = []; let major = false;
+  const add = (lvl, msg) => { flags.push(`<li>${esc(msg)}</li>`); if (lvl === 'major') major = true; };
+  if (p.stamp && p.stamp !== date) add('major', `The sheet says it was generated on ${dateLabel(p.stamp)} but the chosen inventory date is ${dateLabel(date)}.`);
+  const dupSnap = S.snaps.find(s => s.hash && s.hash === rowsHash(p.rows));
+  if (dupSnap) add('major', `The stock figures are identical to the snapshot of ${dateLabel(dupSnap.date)} (${dupSnap.filename}). This may be the same file uploaded twice.`);
+  const others = latestPerDate().filter(s => s.date !== date).sort((a, b) => Math.abs(dayNum(a.date) - dayNum(date)) - Math.abs(dayNum(b.date) - dayNum(date)));
+  let cmp = '';
+  if (!others.length) cmp = 'This is the first snapshot, so there is nothing to compare against.';
+  else {
+    const prev = others[0], pm = prev.meta, pct = (a, b) => b ? (a - b) / b : 0;
+    const dS = pct(cur.skus, pm.skus), dU = pct(cur.sel, pm.sel);
+    cmp = `Compared with ${dateLabel(prev.date)}: SKUs ${fmt(pm.skus)} → ${fmt(cur.skus)}, sellable units ${fmt(pm.sel)} → ${fmt(cur.sel)}, warehouses ${fmt(pm.whs)} → ${fmt(cur.whs)}.`;
+    if (Math.abs(dS) > .25) add('major', `The number of SKUs changed by ${Math.round(dS * 100)}%.`);
+    if (Math.abs(dU) > .5) add('major', `Total sellable stock changed by ${Math.round(dU * 100)}%.`); else if (Math.abs(dU) > .25) add('minor', `Total sellable stock changed by ${Math.round(dU * 100)}%.`);
+    const had = new Set(prev.rows.filter(r => r.sel > 0).map(r => String(r.wid))), has = new Set(p.rows.map(r => String(r.wid))), missing = [...had].filter(w => !has.has(w));
+    if (missing.length >= 3 || (had.size && missing.length / had.size > .15)) add('major', `${missing.length} warehouses that held stock on ${dateLabel(prev.date)} are missing from this file.`); else if (missing.length) add('minor', `${missing.length} warehouse${missing.length > 1 ? 's' : ''} from the previous snapshot are missing.`);
+    const zs = r => r.lines ? r.oos / r.lines : 0; if (zs(cur) > zs(pm) + .25) add('major', `Out-of-stock lines jumped from ${Math.round(zs(pm) * 100)}% to ${Math.round(zs(cur) * 100)}% of all lines.`);
+  }
+  const html = `<div class="note ${major ? 'warn' : 'info'}" style="flex-direction:column"><b>${major ? 'Review before saving' : 'Checked against your history'}</b><span>${esc(cmp)}</span>${flags.length ? `<ul style="margin:0;padding-left:18px">${flags.join('')}</ul>` : '<span>No unusual differences found.</span>'}
+    ${major ? `<label class="rowflex" style="cursor:pointer"><input type="checkbox" id="ack-inv" data-ack="inv" ${u.ack ? 'checked' : ''}> <b>I have checked this file and want to save it</b></label>` : ''}</div>`;
+  return { major, html };
+}
+
+/* upload-page cards */
+function lockedHtml() {
+  return `<div class="card" style="max-width:560px"><header><div><h3>Uploads are for admins</h3><p>This site shows the data published by the admin. You can browse, filter and download reports. Changing data needs the admin passcode.</p></div></header>
+  <form class="stack" id="adm-form" autocomplete="off"><div class="field"><label for="adm-pass">Admin passcode</label><input id="adm-pass" type="password" autocomplete="current-password"></div>
+  <div class="rowflex"><button class="btn primary" type="submit" data-act="admin-login">Sign in</button><span id="adm-msg" class="sub" role="alert"></span></div></form></div>`;
+}
+function adminCards() {
+  const pub = S.published, ah = adminHashNow(), when = d => new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const publishCard = `<div class="card"><header><div><h3>Publish and protect</h3><p>${pub ? `Visitors see the data in <b>soh-data.json</b> published on ${when(pub.publishedAt)}. Only someone who can commit to your repository can change what they see.` : 'Right now every visitor can add data in their own browser. Publish a data file to make the site read-only for everyone except you.'}</p></div></header>
+    <div class="stack">
+      ${S.dirty ? '<div class="note warn"><span><b>You have unpublished changes.</b> Download the data file and commit it to your repository to show them to visitors.</span></div>' : ''}
+      <div class="rowflex"><button class="btn primary" data-act="publish" ${ah ? '' : 'disabled'}>Download soh-data.json</button>${pub && S.dirty ? '<button class="btn danger" data-act="discard-draft">Discard unpublished changes</button>' : ''}${pub ? '<button class="btn" data-act="admin-logout">Sign out</button>' : ''}</div>
+      <ol class="sub" style="margin:0;padding-left:18px"><li>${ah ? 'Passcode is set.' : 'Set an admin passcode below.'}</li><li>Download <b>soh-data.json</b>.</li><li>Put it in your repository next to <b>index.html</b> and commit. Wait about a minute for GitHub Pages to update.</li></ol>
+      <form class="grid cols2" id="pass-form" autocomplete="off"><div class="field"><label for="np1">${ah ? 'Change admin passcode' : 'New admin passcode'} (8+ characters)</label><input id="np1" type="password" autocomplete="new-password"></div><div class="field"><label for="np2">Repeat passcode</label><input id="np2" type="password" autocomplete="new-password"></div>
+      <div class="rowflex"><button class="btn" type="submit" data-act="set-pass">${ah ? 'Change passcode' : 'Set passcode'}</button><span id="np-msg" class="sub" role="alert"></span></div></form>
+      <div class="note info"><span><b>How strong is this?</b> The site is a static page, so the passcode only controls the editing screens. It stops accidental changes and casual visitors. The real protection is that visitors read <b>soh-data.json</b> from your repository, and only people with write access to the repository can replace it. Use a long passcode: the file can be downloaded and a short passcode guessed offline.</span></div>
+    </div></div>`;
+  const bin = S.trash.length ? `<div class="card"><header><div><h3>Recycle bin</h3><p>Deleted snapshots are kept here on this device.</p></div></header><div class="tablewrap"><table><thead><tr><th class="nosort">Date</th><th class="nosort">File</th><th class="nosort r">Stock</th><th class="nosort">Actions</th></tr></thead><tbody>${S.trash.map(s => `<tr><td>${dateLabel(s.date)}</td><td class="wrap">${esc(s.filename)}</td><td class="r">${fmt(s.meta?.sel ?? summarize(s.rows).sel)}</td><td><div class="rowflex"><button class="btn sm" data-act="restore-snap" data-id="${s.id}">Restore</button><button class="btn sm danger" data-act="purge-snap" data-id="${s.id}">Delete forever</button></div></td></tr>`).join('')}</tbody></table></div></div>` : '';
+  const log = `<div class="card"><header><div><h3>Activity log</h3><p>Recent changes made in this browser.</p></div></header>${S.log.length ? `<div class="stack">${S.log.slice(0, 12).map(l => `<div class="rowflex"><span class="sub num" style="min-width:150px">${when(l.t)}</span><span>${esc(l.msg)}</span></div>`).join('')}</div>` : '<div class="empty">No activity yet.</div>'}</div>`;
+  return publishCard + bin + log;
+}
+function modeChips() {
+  if (S.mode !== 'published') return '';
+  return S.admin ? (S.dirty ? '<a class="btn sm" href="#upload">Unpublished changes</a>' : '<span class="chip g">Admin</span>') : '<span class="chip">Read-only</span>';
+}
+
+/* handlers */
+document.addEventListener('submit', async e => {
+  if (e.target.id === 'adm-form') { e.preventDefault(); const m = $('#adm-msg'); m.textContent = 'Checking…'; const err = await adminLogin($('#adm-pass').value); if (err) m.textContent = err; else render(); }
+  else if (e.target.id === 'pass-form') {
+    e.preventDefault(); const a = $('#np1').value, b = $('#np2').value, m = $('#np-msg');
+    if (!canEdit()) return; if (a.length < 8) { m.textContent = 'Use at least 8 characters.'; return; } if (a !== b) { m.textContent = 'The two passcodes do not match.'; return; }
+    if (!(window.crypto && crypto.subtle)) { m.textContent = 'This browser cannot hash passcodes here. Open the site over https.'; return; }
+    m.textContent = 'Saving…'; const h = await makeAdminHash(a);
+    if (S.mode === 'published') S.published.adminHash = h; else { S.localHash = h; await Store.put('kv', h, 'adminhash'); }
+    logAct('Admin passcode set'); toast('Passcode saved. Download soh-data.json to publish it.'); render();
+  }
+});
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]'); if (!b) return; const a = b.dataset.act, id = b.dataset.id;
+  if (a === 'admin-logout') adminLogout();
+  else if (a === 'publish' && canEdit()) {
+    const settings = {}; PLAN_KEYS.forEach(k => settings[k] = S.settings[k]);
+    const bundle = { app: 'soh-tracker', v: 2, publishedAt: Date.now(), adminHash: adminHashNow(), snaps: S.snaps.map(packSnap), sales: S.sales, map: S.map, settings };
+    logAct(`Created soh-data.json with ${S.snaps.length} snapshots`); await saveFile('soh-data.json', JSON.stringify(bundle));
+  } else if (a === 'discard-draft' && canEdit()) { if (!armed(b, 'Confirm discard?')) return; await Store.put('kv', null, 'draft'); loadBase(); logAct('Discarded unpublished changes'); render(); }
+  else if (a === 'restore-snap' && canEdit()) { const s = S.trash.find(x => x.id === id); if (!s) return; S.trash = S.trash.filter(x => x.id !== id); S.snaps.push(s); await Store.put('snaps', s); await Store.put('kv', S.trash, 'trash'); logAct(`Restored snapshot ${s.date}`); toast('Snapshot restored'); render(); }
+  else if (a === 'purge-snap' && canEdit()) { if (!armed(b, 'Confirm delete forever?')) return; S.trash = S.trash.filter(x => x.id !== id); await Store.put('kv', S.trash, 'trash'); render(); }
+});
+document.addEventListener('change', e => { const t = e.target; if (t.dataset.ack === 'inv') { if (S.up.inv) S.up.inv.ack = t.checked; render(); } });
+
+/* boot */
 async function boot() {
   await Store.open();
+  let bundle = null;
+  try { const r = await fetch('soh-data.json?t=' + Date.now(), { cache: 'no-store' }); if (r.ok) { const j = await r.json(); if (j && j.app === 'soh-tracker') bundle = j; } } catch (e) { }
   try {
-    S.snaps = await Store.all('snaps'); S.sales = await Store.all('sales');
-    const mp = await Store.getKv('skumap'); if (mp && mp.rows) S.map = mp;
-    const st = await Store.getKv('settings'); S.settings.whStatus = {}; if (st) S.settings = { ...DEFAULTS, ...st, overrides: st.overrides || {}, whStatus: { ...(st.whStatus || {}) } };
-    if (!S.snaps.length && !(await Store.getKv('seeded')) && typeof SAMPLE !== 'undefined') {
-      const rows = SAMPLE.map(a => ({ id: String(a[0]), nm: a[1], br: a[2], upc: a[3] || '', uom: a[4] || '', wid: String(a[5]), wn: a[6], cat: catOf(a[1]), sel: a[7], inc: a[8], uns: a[9], dmg: a[10], lost: a[11], exp: a[12], nex: a[13], s7: a[14], s15: a[15], s30: a[16] }));
-      const snap = { id: uid(), date: '2026-11-08', uploadedAt: Date.parse('2026-11-08T03:26:47+05:30'), filename: 'InventoryData_46.xlsx', rows, meta: summarize(rows) };
-      S.snaps.push(snap); await Store.put('snaps', snap); await Store.put('kv', true, 'seeded');
+    S.trash = (await Store.getKv('trash')) || []; S.log = (await Store.getKv('log')) || [];
+    if (bundle) {
+      S.mode = 'published'; S.published = bundle; loadBase();
+      try { if (sessionStorage.getItem('soh-admin') === '1') { S.admin = true; await tryDraft(); } } catch (e) { }
+    } else {
+      S.snaps = await Store.all('snaps'); S.sales = await Store.all('sales'); S.localHash = (await Store.getKv('adminhash')) || null;
+      const mp = await Store.getKv('skumap'); if (mp && mp.rows) S.map = mp;
+      const st = await Store.getKv('settings'); S.settings.whStatus = {};
+      if (st) S.settings = { ...DEFAULTS, ...st, overrides: st.overrides || {}, whStatus: { ...(st.whStatus || {}) } };
+      if (!S.snaps.length && !(await Store.getKv('seeded')) && typeof SAMPLE !== 'undefined') {
+        const rows = SAMPLE.map(a => ({ id: String(a[0]), nm: a[1], br: a[2], upc: a[3] || '', uom: a[4] || '', wid: String(a[5]), wn: a[6], cat: catOf(a[1]), sel: a[7], inc: a[8], uns: a[9], dmg: a[10], lost: a[11], exp: a[12], nex: a[13], s7: a[14], s15: a[15], s30: a[16] }));
+        const snap = { id: uid(), date: '2026-11-08', uploadedAt: Date.parse('2026-11-08T03:26:47+05:30'), filename: 'InventoryData_46.xlsx', hash: rowsHash(rows), rows, meta: summarize(rows) };
+        S.snaps.push(snap); await Store.put('snaps', snap); await Store.put('kv', true, 'seeded');
+      }
     }
   } catch (e) { console.error(e); }
-  buildSalesIdx(); route();
+  buildMapIdx(); buildSalesIdx(); route();
 }
 boot();
 
 </script>
+</body>
+</html>
