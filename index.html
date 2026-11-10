@@ -568,13 +568,13 @@ const ICON = {
 };
 const TABS = [['dashboard', 'Dashboard'], ['top-sellers', 'Top sellers'], ['warehouses', 'Warehouses'], ['upload', 'Upload'], ['history', 'History'], ['compare', 'Compare'], ['planning', 'Planning']];
 function renderNav() {
-  $('#nav').innerHTML = TABS.map(([k, l]) => `<a href="#${k}" ${S.ui.tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[k]}</svg><span>${l}</span></a>`).join('');
+  $('#nav').innerHTML = TABS.filter(([k]) => k !== 'upload' || canEdit() || S.ui.tab === 'upload').map(([k, l]) => `<a href="#${k}" ${S.ui.tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[k]}</svg><span>${l}</span></a>`).join('');
   $('#railnote').textContent = S.mode === 'published' ? (S.admin ? 'Admin · edits are a draft until you publish.' : 'Read-only · showing published data.') : (Store.ok ? 'Saved in this browser (IndexedDB).' : 'Storage unavailable: data will be lost on refresh.');
 }
 function renderTop() {
   const s = activeSnap(), t = { dashboard: 'Inventory dashboard', 'top-sellers': 'Top-selling SKUs', warehouses: 'Warehouse status', upload: 'Upload data', history: 'History by month and date', compare: 'Compare stock', planning: 'Replenishment planning' }[S.ui.tab];
   $('#topband').innerHTML = `<div><h1>${t}</h1><small>${s ? `Stock on hand as of ${dateLabel(s.date)} · uploaded ${new Date(s.uploadedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ${esc(s.filename)}` : 'No inventory uploaded yet'}</small></div>
-  <div class="rowflex">${shutCount() && S.ui.tab !== 'warehouses' ? `<button class="btn sm" data-act="toggle-shut" title="Toggle shutdown warehouses in the numbers">${shutCount()} shutdown · ${S.settings.includeShut ? 'included' : 'excluded'}</button>` : ''}${modeChips()}<a class="btn primary" href="#upload">${canEdit() ? "Upload today's sheet" : 'Admin sign-in'}</a></div>`;
+  <div class="rowflex">${shutCount() && S.ui.tab !== 'warehouses' ? `<button class="btn sm" data-act="toggle-shut" title="Toggle shutdown warehouses in the numbers">${shutCount()} shutdown · ${S.settings.includeShut ? 'included' : 'excluded'}</button>` : ''}${modeChips()}${canEdit() ? '<a class="btn primary" href="#upload">Upload today\'s sheet</a>' : ''}</div>`;
 }
 
 /* ---------- charts ---------- */
@@ -1179,6 +1179,7 @@ function render() {
   const y = window.scrollY;
   renderNav(); renderTop();
   try { $('#page').innerHTML = VIEWS[S.ui.tab](); } catch (e) { $('#page').innerHTML = `<div class="note crit">Something went wrong drawing this page: ${esc(e.message)}</div>`; console.error(e); }
+  if (S.mode === 'published' && !S.admin && S.ui.tab !== 'upload') $('#page').insertAdjacentHTML('beforeend', '<div class="sub" style="text-align:center;padding-top:8px"><a href="#upload">Admin sign-in</a></div>');
   try { AFTER[S.ui.tab]?.(); } catch (e) { console.error(e); }
   if (fid) { const n = document.getElementById(fid); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) { } } }
   window.scrollTo(0, y);
@@ -1287,9 +1288,9 @@ async function restore(file) {
 
 
 /* ---------- access control, publishing, safeguards, boot ---------- */
-S.mode = 'local'; S.admin = false; S.ghToken = null; S.ghRepo = ''; S.autoPub = true; S.pubBusy = false; S.pubErr = ''; S.lastPubStr = ''; S.lastPubAt = 0; S.trash = []; S.log = []; S.published = null; S.dirty = false; S.localHash = null;
+S.mode = 'local'; S.admin = false; S.ghToken = null; S.ghRepo = ''; S.autoPub = true; S.pubBusy = false; S.pubErr = ''; S.lastPubStr = ''; S.lastPubAt = 0; S.trash = []; S.log = []; S.published = null; S.dirty = false; S.authUsers = [];
 const canEdit = () => S.mode !== 'published' || S.admin;
-const MUT = new Set(['up-save', 'del-sales', 'del-snap', 'clear-map', 'wipe', 'restore-snap', 'purge-snap', 'publish', 'discard-draft', 'download-bundle']);
+const MUT = new Set(['up-save', 'del-sales', 'del-snap', 'clear-map', 'wipe', 'restore-snap', 'purge-snap', 'publish', 'discard-draft', 'download-bundle', 'del-login']);
 const PLAN_KEYS = ['windowDays', 'lead', 'safe', 'review', 'excess', 'slowMax30', 'lowUnits', 'inclInc', 'roundTo', 'source', 'overrides', 'whStatus'];
 
 /* pack / unpack for compact files */
@@ -1301,6 +1302,34 @@ function rowsHash(rows) { let h = 5381; const s = rows.map(r => `${r.id}|${r.wid
 
 /* activity log */
 function logAct(msg) { S.log.unshift({ t: Date.now(), msg }); S.log = S.log.slice(0, 200); Store.put('kv', S.log, 'log'); }
+
+/* username + password: the password unlocks an encrypted copy of the GitHub token stored in the published file */
+const hexOf = b => [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+const unhex = h => new Uint8Array(h.match(/../g).map(x => parseInt(x, 16)));
+const AUTH_ITER = 600000;
+async function pwKey(pass, salt, iter, usage) {
+  const km = await crypto.subtle.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: iter, hash: 'SHA-256' }, km, { name: 'AES-GCM', length: 256 }, false, usage);
+}
+async function makeLogin(username, pass, payload) {
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12)), key = await pwKey(pass, salt, AUTH_ITER, ['encrypt']);
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(payload)));
+  return { u: username, salt: hexOf(salt), iter: AUTH_ITER, iv: hexOf(iv), ct: hexOf(ct), at: Date.now() };
+}
+async function openLogin(rec, pass) {
+  const key = await pwKey(pass, unhex(rec.salt), rec.iter, ['decrypt']);
+  return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unhex(rec.iv) }, key, unhex(rec.ct))));
+}
+async function loginWithPassword(user, pass) {
+  if (!(window.crypto && crypto.subtle)) return 'This browser cannot check passwords here. Open the site over https.';
+  const rec = S.authUsers.find(x => x.u === user.trim().toLowerCase()), bad = 'Username or password is incorrect.';
+  if (!rec) { await new Promise(r => setTimeout(r, 600)); return bad; }
+  let p; try { p = await openLogin(rec, pass); } catch (e) { return bad; }
+  const err = await ghConnect(p.repo, p.token);
+  if (err) return /did not accept/.test(err) ? 'The saved GitHub token has expired or was cancelled. Use "Sign in with a GitHub token instead", then create your login again.' : err;
+  logAct(`Signed in as ${rec.u}`); return '';
+}
+function saveAuth() { if (S.mode === 'published') { S.dirty = true; saveDraft(); } else Store.put('kv', S.authUsers, 'authusers'); render(); }
 
 /* admin identity: a GitHub token that can write to the repository (GitHub enforces the permission) */
 const GH = 'https://api.github.com';
@@ -1330,7 +1359,7 @@ function adminLogout() {
   if (S.mode === 'published') loadBase(); S.up = { inv: null, sales: null }; toast('Signed out'); render();
 }
 const b64 = str => { const bytes = new TextEncoder().encode(str); let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(bin); };
-const bundleBody = () => { const settings = {}; PLAN_KEYS.forEach(k => settings[k] = S.settings[k]); return { snaps: S.snaps.map(packSnap), sales: S.sales, map: S.map, settings }; };
+const bundleBody = () => { const settings = {}; PLAN_KEYS.forEach(k => settings[k] = S.settings[k]); return { snaps: S.snaps.map(packSnap), sales: S.sales, map: S.map, settings, auth: { users: S.authUsers } }; };
 async function publishNow(why) {
   if (!S.ghToken || !canEdit()) return;
   if (S.pubBusy) { S.pubAgain = true; return; }
@@ -1354,21 +1383,21 @@ const schedAuto = debounce(() => publishNow('auto'), 3000);
 /* published data (read-only for visitors) */
 function loadBase() {
   const b = S.published;
-  S.snaps = (b.snaps || []).map(unpackSnap); S.sales = b.sales || []; S.map = b.map || null;
+  S.snaps = (b.snaps || []).map(unpackSnap); S.sales = b.sales || []; S.map = b.map || null; S.authUsers = [...(b.auth?.users || [])];
   S.settings = { ...DEFAULTS, ...(b.settings || {}), overrides: { ...(b.settings?.overrides || {}) }, whStatus: { ...(b.settings?.whStatus || {}) }, includeShut: false };
   S.ui.snapId = null; S.dirty = false; S.whVer++; metaCache.clear(); buildMapIdx(); buildSalesIdx();
 }
 async function tryDraft() {
   const d = await Store.getKv('draft');
   if (d && d.base === S.published.publishedAt) {
-    S.snaps = d.snaps.map(unpackSnap); S.sales = d.sales || []; S.map = d.map || null;
+    S.snaps = d.snaps.map(unpackSnap); S.sales = d.sales || []; S.map = d.map || null; if (d.auth) S.authUsers = d.auth;
     S.settings = { ...DEFAULTS, ...d.settings, overrides: { ...(d.settings?.overrides || {}) }, whStatus: { ...(d.settings?.whStatus || {}) } };
     S.dirty = true; S.whVer++; metaCache.clear(); buildMapIdx(); buildSalesIdx();
   }
 }
 const saveDraft = debounce(async () => {
   if (S.mode !== 'published' || !S.admin) return; S.dirty = true;
-  try { await Store.put('kv', { base: S.published.publishedAt, savedAt: Date.now(), snaps: S.snaps.map(packSnap), sales: S.sales, map: S.map, settings: S.settings }, 'draft'); } catch (e) { }
+  try { await Store.put('kv', { base: S.published.publishedAt, savedAt: Date.now(), snaps: S.snaps.map(packSnap), sales: S.sales, map: S.map, auth: S.authUsers, settings: S.settings }, 'draft'); } catch (e) { }
   renderTop(); if (S.autoPub && S.ghToken) schedAuto();
 }, 300);
 /* wrong-file review for inventory uploads */
@@ -1402,7 +1431,13 @@ const ghForm = (id, btn) => `<form class="stack" id="${id}" autocomplete="off"><
   <div class="field"><label for="${id}-tok">GitHub token</label><input id="${id}-tok" type="password" autocomplete="off" placeholder="github_pat_…"></div></div>
   <div class="rowflex"><button class="btn primary" type="submit">${btn}</button><span id="${id}-msg" class="sub" role="alert"></span></div></form>${TOKEN_HELP}`;
 function lockedHtml() {
-  return `<div class="card" style="max-width:720px"><header><div><h3>Admin sign-in</h3><p>This site shows data published by the admin. You can browse, filter and download reports. To upload or change data, sign in with a GitHub token that can write to the site's repository. GitHub decides who is allowed. The token is kept only in this browser tab and is removed when you sign out or close the tab.</p></div></header>${ghForm('adm-form', 'Sign in')}</div>`;
+  const has = S.authUsers.length > 0;
+  const pw = `<form class="stack" id="login-form" autocomplete="on"><div class="grid cols2"><div class="field"><label for="lg-user">Username</label><input id="lg-user" name="username" autocomplete="username" autocapitalize="off" spellcheck="false"></div>
+    <div class="field"><label for="lg-pass">Password</label><input id="lg-pass" name="password" type="password" autocomplete="current-password"></div></div>
+    <div class="rowflex"><button class="btn primary" type="submit">Sign in</button><span id="login-form-msg" class="sub" role="alert"></span></div></form>`;
+  return `<div class="card" style="max-width:720px"><header><div><h3>Admin sign-in</h3><p>This site shows data published by the admin. You can browse, filter and download reports. Sign in to upload or change data.</p></div></header>
+    ${has ? pw + `<details style="margin-top:14px"><summary class="sub" style="cursor:pointer">Sign in with a GitHub token instead</summary><div style="margin-top:10px">${ghForm('adm-form', 'Sign in with token')}</div></details>`
+      : `<div class="note info" style="margin-bottom:12px"><span>No username and password exist yet. Sign in once with the GitHub token, then create a login on the Upload page.</span></div>${ghForm('adm-form', 'Sign in with token')}`}</div>`;
 }
 function adminCards() {
   const pub = S.published, when = d => new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -1419,20 +1454,35 @@ function adminCards() {
       <div class="rowflex"><button class="btn sm" data-act="download-bundle">Download soh-data.json (manual backup)</button><button class="btn sm" data-act="check-live">Check live site</button><span id="chk-msg" class="sub" role="status"></span></div>
       <div class="note info"><span><b>How the protection works.</b> Visitors only read <b>soh-data.json</b> from your repository. Changing it needs a token with write access, which GitHub checks. Uploads, deletes and warehouse changes are hidden for visitors. Every publish is saved in the repository's history, so you can restore an older version from GitHub.</span></div>
     </div></div>`;
+  const loginsCard = conn ? `<div class="card"><header><div><h3>Admin login</h3><p>The one username and password for the admin. Everyone else only views. Setting a new login replaces the old one. The password protects an encrypted copy of the site's GitHub token, which visitors never see.</p></div></header><div class="stack">
+    ${S.authUsers.length ? `<div class="tablewrap"><table><thead><tr><th class="nosort">Username</th><th class="nosort">Created</th><th class="nosort">Actions</th></tr></thead><tbody>${S.authUsers.map(u => `<tr><td><b>${esc(u.u)}</b></td><td>${when(u.at)}</td><td><button class="btn sm danger" data-act="del-login" data-u="${esc(u.u)}">Remove</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="note warn"><span>No admin login yet. Create one so you can sign in with a username and password next time.</span></div>'}
+    <form class="stack" id="logins-form" autocomplete="off"><div class="formgrid"><div class="field"><label for="lg-u">Username</label><input id="lg-u" autocomplete="off" autocapitalize="off" spellcheck="false"></div><div class="field"><label for="lg-p1">Password (10+ characters)</label><input id="lg-p1" type="password" autocomplete="new-password"></div><div class="field"><label for="lg-p2">Repeat password</label><input id="lg-p2" type="password" autocomplete="new-password"></div></div>
+    <div class="rowflex"><button class="btn primary" type="submit">${S.authUsers.length ? 'Replace login' : 'Create login'}</button><span id="lg-msg" class="sub" role="alert"></span></div></form>
+    <div class="note info"><span>Use a long password, 12 or more characters. The encrypted token is stored in the public data file, so the password is the only thing protecting it. Removing a login does not cancel the token. To cut off access completely, delete the token on GitHub and make a new one.</span></div></div></div>` : '';
   const bin = S.trash.length ? `<div class="card"><header><div><h3>Recycle bin</h3><p>Deleted snapshots are kept here on this device.</p></div></header><div class="tablewrap"><table><thead><tr><th class="nosort">Date</th><th class="nosort">File</th><th class="nosort r">Stock</th><th class="nosort">Actions</th></tr></thead><tbody>${S.trash.map(s => `<tr><td>${dateLabel(s.date)}</td><td class="wrap">${esc(s.filename)}</td><td class="r">${fmt(s.meta?.sel ?? summarize(s.rows).sel)}</td><td><div class="rowflex"><button class="btn sm" data-act="restore-snap" data-id="${s.id}">Restore</button><button class="btn sm danger" data-act="purge-snap" data-id="${s.id}">Delete forever</button></div></td></tr>`).join('')}</tbody></table></div></div>` : '';
   const log = `<div class="card"><header><div><h3>Activity log</h3><p>Recent changes made in this browser.</p></div></header>${S.log.length ? `<div class="stack">${S.log.slice(0, 12).map(l => `<div class="rowflex"><span class="sub num" style="min-width:150px">${when(l.t)}</span><span>${esc(l.msg)}</span></div>`).join('')}</div>` : '<div class="empty">No activity yet.</div>'}</div>`;
-  return publishCard + bin + log;
+  return publishCard + loginsCard + bin + log;
 }
 function modeChips() {
   if (S.mode !== 'published') return '';
-  if (!S.admin) return '<span class="chip">Read-only</span>';
+  if (!S.admin) return '';
   const st = S.pubBusy ? '<span class="chip y">Publishing…</span>' : S.pubErr ? '<a class="btn sm" href="#upload">Publish failed</a>' : S.dirty ? '<a class="btn sm" href="#upload">Not published yet</a>' : '<span class="chip g">Admin · published</span>';
   return st + '<button class="btn sm" data-act="admin-logout">Sign out</button>';
 }
 
 /* handlers */
 document.addEventListener('submit', async e => {
-  const id = e.target.id; if (id !== 'adm-form' && id !== 'conn-form') return; e.preventDefault();
+  const id = e.target.id;
+  if (id === 'login-form') { e.preventDefault(); const m = $('#login-form-msg'); m.textContent = 'Checking…'; const err = await loginWithPassword($('#lg-user').value, $('#lg-pass').value); if (err) m.textContent = err; else { toast('Signed in'); render(); } return; }
+  if (id === 'logins-form') {
+    e.preventDefault(); if (!canEdit() || !S.ghToken) return; const m = $('#lg-msg'), u = $('#lg-u').value.trim().toLowerCase(), p1 = $('#lg-p1').value, p2 = $('#lg-p2').value;
+    if (!/^[a-z0-9._-]{3,30}$/.test(u)) { m.textContent = 'Username: 3 to 30 letters, numbers, dots, dashes or underscores.'; return; }
+    if (p1.length < 10) { m.textContent = 'Use at least 10 characters.'; return; } if (p1 !== p2) { m.textContent = 'The two passwords do not match.'; return; }
+    if (!(window.crypto && crypto.subtle)) { m.textContent = 'This browser cannot encrypt here. Open the site over https.'; return; }
+    m.textContent = 'Creating… (a few seconds)'; const rec = await makeLogin(u, p1, { token: S.ghToken, repo: S.ghRepo });
+    S.authUsers = [rec]; logAct(`Set admin login ${u}`); toast('Admin login saved' + (S.mode === 'published' ? '. Publishing…' : '. Publish to make it available.')); saveAuth(); return;
+  }
+  if (id !== 'adm-form' && id !== 'conn-form') return; e.preventDefault();
   const m = $('#' + id + '-msg'); m.textContent = 'Checking…';
   const err = await ghConnect($('#' + id + '-repo').value, $('#' + id + '-tok').value);
   if (err) m.textContent = err; else { toast('Signed in'); render(); }
@@ -1447,6 +1497,7 @@ document.addEventListener('click', async e => {
     catch (e) { m.textContent = 'Could not read it (' + e.message + '). Download soh-data.json again and replace the file.'; }
   }
   else if (a === 'admin-logout') adminLogout();
+  else if (a === 'del-login' && canEdit()) { if (!armed(b, 'Confirm remove?')) return; S.authUsers = S.authUsers.filter(x => x.u !== b.dataset.u); logAct(`Removed login ${b.dataset.u}`); saveAuth(); }
   else if (a === 'publish') await publishNow('manual');
   else if (a === 'download-bundle' && canEdit()) { const bundle = { app: 'soh-tracker', v: 2, publishedAt: Date.now(), adminHash: null, ...bundleBody() }; await saveFile('soh-data.json', JSON.stringify(bundle)); }
   else if (a === 'discard-draft' && canEdit()) { if (!armed(b, 'Confirm discard?')) return; await Store.put('kv', null, 'draft'); loadBase(); logAct('Discarded unpublished changes'); render(); }
@@ -1468,7 +1519,7 @@ async function boot() {
       S.mode = 'published'; S.published = bundle; loadBase(); S.lastPubStr = JSON.stringify(bundleBody());
       if (S.ghToken) { S.admin = true; await tryDraft(); }
     } else {
-      S.snaps = await Store.all('snaps'); S.sales = await Store.all('sales'); 
+      S.snaps = await Store.all('snaps'); S.sales = await Store.all('sales'); S.authUsers = (await Store.getKv('authusers')) || []; 
       const mp = await Store.getKv('skumap'); if (mp && mp.rows) S.map = mp;
       const st = await Store.getKv('settings'); S.settings.whStatus = {};
       if (st) S.settings = { ...DEFAULTS, ...st, overrides: st.overrides || {}, whStatus: { ...(st.whStatus || {}) } };
