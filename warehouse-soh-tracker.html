@@ -1,0 +1,1488 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>html{-webkit-text-size-adjust:100%}body{margin:0;font-size:14px}[hidden]{display:none!important}img{max-width:100%}</style>
+<title>Blinkit SOH Tracker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Bricolage+Grotesque:wght@600;700;800&display=swap">
+<style>
+/* Layout: left rail (desktop) / bottom tab bar (phone), yellow top band, white work surface with green actions */
+:root{
+  --yellow:#F8CB46; --yellow-ink:#3a2f00; --green:#0C831F; --green-soft:#E3F3E6; --green-ink:#075214;
+  --bg:#F3F5F0; --surface:#FFFFFF; --surface2:#F8FAF6; --line:#E1E6DC; --fg:#1B221B; --muted:#5E6B5E;
+  --warn:#B45309; --warn-soft:#FDF0D5; --crit:#C62828; --crit-soft:#FBE4E2; --info:#1F5FA8; --info-soft:#E1EDFA;
+  --chart1:#0C831F; --chart2:#E0A800; --chart3:#C62828; --grid:#E6EAE1;
+  --font-body:'Figtree',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --font-head:'Bricolage Grotesque','Figtree',system-ui,sans-serif;
+  --shadow:0 1px 2px rgba(20,40,20,.06),0 4px 14px rgba(20,40,20,.05);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --green:#3DBA52; --green-soft:#16301b; --green-ink:#9be3a9; --bg:#0F130F; --surface:#171C17; --surface2:#1c221c; --line:#2a322a; --fg:#E8EEE5; --muted:#99A699;
+  --warn:#F2B45A; --warn-soft:#3a2b10; --crit:#FF8A80; --crit-soft:#3d1c1a; --info:#8DBBF2; --info-soft:#17283d;
+  --chart1:#3DBA52; --chart2:#F8CB46; --chart3:#FF8A80; --grid:#2a322a; --shadow:none; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --green:#3DBA52; --green-soft:#16301b; --green-ink:#9be3a9; --bg:#0F130F; --surface:#171C17; --surface2:#1c221c; --line:#2a322a; --fg:#E8EEE5; --muted:#99A699;
+  --warn:#F2B45A; --warn-soft:#3a2b10; --crit:#FF8A80; --crit-soft:#3d1c1a; --info:#8DBBF2; --info-soft:#17283d;
+  --chart1:#3DBA52; --chart2:#F8CB46; --chart3:#FF8A80; --grid:#2a322a; --shadow:none; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:14px;line-height:1.45;
+  padding-left:max(0px,env(safe-area-inset-left,0px));padding-right:max(0px,env(safe-area-inset-right,0px))}
+h1,h2,h3{font-family:var(--font-head);margin:0;text-wrap:balance;letter-spacing:-.01em}
+h2{font-size:20px}h3{font-size:15px;font-weight:700}
+button,input,select{font:inherit;color:inherit}
+.num{font-variant-numeric:tabular-nums}
+.app{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100vh}
+.rail{background:var(--surface);border-right:1px solid var(--line);padding:16px 12px;position:sticky;top:0;align-self:start;height:100vh;display:flex;flex-direction:column;gap:4px}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 8px 16px;font-family:var(--font-head);font-weight:800;font-size:17px;line-height:1.1}
+.logo{width:36px;height:36px;border-radius:10px;background:var(--yellow);display:grid;place-items:center;color:var(--green)}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:var(--muted);text-decoration:none;font-weight:600}
+.nav a svg{width:20px;height:20px;flex:none}
+.nav a:hover{background:var(--surface2)}
+.nav a[aria-current="page"]{background:var(--green-soft);color:var(--green-ink)}
+.nav{display:flex;flex-direction:column;gap:2px}
+.railnote{margin-top:auto;font-size:12px;color:var(--muted);padding:8px}
+main{min-width:0}
+.topband{background:var(--yellow);color:var(--yellow-ink);padding-block:14px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.topband .row{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;max-width:1280px;margin:0 auto}
+.topband h1{font-size:22px;font-weight:800}
+.topband small{display:block;font-size:12.5px;opacity:.85;font-weight:500}
+.chip{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:700;background:var(--surface2);border:1px solid var(--line);white-space:nowrap}
+.chip.g{background:var(--green-soft);color:var(--green-ink);border-color:transparent}
+.chip.y{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+.chip.r{background:var(--crit-soft);color:var(--crit);border-color:transparent}
+.chip.b{background:var(--info-soft);color:var(--info);border-color:transparent}
+.page{max-width:1280px;margin:0 auto;padding-block:16px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:var(--shadow);min-width:0}
+.card>header{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between;margin-bottom:12px}
+.card>header p{margin:2px 0 0;color:var(--muted);font-size:12.5px}
+.grid{display:grid;gap:12px}
+.kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;text-align:left;cursor:default;min-width:0;display:flex;flex-direction:column;gap:2px}
+button.kpi{cursor:pointer}button.kpi:hover{border-color:var(--green)}
+.kpi .l{font-size:12px;color:var(--muted);font-weight:600}
+.kpi .v{font-family:var(--font-head);font-size:28px;font-weight:800;line-height:1.1}
+.kpi .s{font-size:12px;color:var(--muted)}
+.kpi.crit .v{color:var(--crit)}.kpi.warn .v{color:var(--warn)}
+.up{color:var(--green-ink)}.down{color:var(--crit)}
+.cols2{grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr))}
+.cols3{grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))}
+.chartbox{position:relative;height:240px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:8px 14px;font-weight:600;cursor:pointer;min-height:38px}
+.btn:hover{border-color:var(--green)}
+.btn.primary{background:var(--green);color:#fff;border-color:var(--green)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.yellow{background:var(--yellow);color:var(--yellow-ink);border-color:var(--yellow)}
+.btn.danger{color:var(--crit)}.btn.danger.armed{background:var(--crit);color:#fff;border-color:var(--crit)}
+.btn.sm{padding:4px 10px;min-height:30px;font-size:12.5px}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+:focus-visible{outline:3px solid var(--info);outline-offset:2px}
+.field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.field label{font-size:12px;font-weight:600;color:var(--muted)}
+.field input,.field select{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 10px;min-height:38px;min-width:0;width:100%}
+.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface2);flex-wrap:wrap}
+.seg.nw{flex-wrap:nowrap}
+.seg button{white-space:nowrap}
+.seg button{border:0;background:transparent;padding:7px 12px;font-weight:600;cursor:pointer;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--green);color:#fff}
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.pill{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:6px 12px;font-weight:600;cursor:pointer;font-size:13px}
+.pill[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.pill b{font-variant-numeric:tabular-nums}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:middle}
+th{background:var(--surface2);font-size:12px;color:var(--muted);position:sticky;top:0;cursor:pointer;user-select:none}
+th.nosort{cursor:default}
+td.r,th.r{text-align:right;font-variant-numeric:tabular-nums}
+td.wrap{white-space:normal;min-width:200px}
+tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--surface2)}
+.sub{color:var(--muted);font-size:12px}
+.tags{display:flex;gap:4px;flex-wrap:wrap}
+.pager{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin-top:10px;color:var(--muted);font-size:12.5px}
+.drop{border:2px dashed var(--line);border-radius:14px;padding:22px 14px;text-align:center;background:var(--surface2);cursor:pointer;display:block}
+.drop:hover,.drop.over{border-color:var(--green);background:var(--green-soft)}
+.drop input{position:absolute;opacity:0;width:1px;height:1px}
+.drop strong{display:block;font-size:15px}
+.drop span{color:var(--muted);font-size:12.5px}
+.note{border-radius:10px;padding:10px 12px;font-size:13px;display:flex;gap:8px}
+.note.warn{background:var(--warn-soft);color:var(--warn)}
+.note.crit{background:var(--crit-soft);color:var(--crit)}
+.note.info{background:var(--info-soft);color:var(--info)}
+.note.ok{background:var(--green-soft);color:var(--green-ink)}
+.stack{display:flex;flex-direction:column;gap:10px}
+.rowflex{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.empty{padding:28px 12px;text-align:center;color:var(--muted)}
+.empty b{display:block;color:var(--fg);font-size:15px;margin-bottom:4px}
+details.month{border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+details.month>summary{list-style:none;cursor:pointer;padding:12px 14px;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;justify-content:space-between;font-weight:700}
+details.month>summary::-webkit-details-marker{display:none}
+details.month[open]>summary{border-bottom:1px solid var(--line)}
+details.month .inner{padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+.assump{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:10px}
+.assump div{background:var(--surface2);border-radius:10px;padding:10px 12px;font-size:13px}
+.assump b{display:block;font-size:12px;color:var(--muted);margin-bottom:2px}
+.formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(76px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:10px;z-index:50;max-width:92vw;font-weight:600}
+.selrow td{background:var(--green-soft)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+@media (max-width:860px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .rail{position:fixed;bottom:0;left:0;right:0;top:auto;height:auto;z-index:20;flex-direction:row;padding:6px 6px calc(6px + env(safe-area-inset-bottom,0px));border-right:0;border-top:1px solid var(--line)}
+  .brand,.railnote{display:none}
+  .nav{flex-direction:row;width:100%;justify-content:space-around}
+  .nav a{flex-direction:column;gap:2px;padding:6px 2px;font-size:10px;flex:1;align-items:center;text-align:center}
+  body{padding-bottom:70px}
+  .topband h1{font-size:19px}
+  .kpi .v{font-size:24px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="rail" aria-label="Main">
+    <div class="brand"><span class="logo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg></span><span>Blinkit<br>SOH Tracker</span></div>
+    <div class="nav" id="nav"></div>
+    <div class="railnote" id="railnote"></div>
+  </nav>
+  <main>
+    <div class="topband"><div class="row" id="topband"></div></div>
+    <div class="page" id="page"></div>
+  </main>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+const SAMPLE=[[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",264,"Farukhnagar - SR",0,0,1,0,1,0,0,0,0,0],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",1206,"Lucknow L4",51,0,0,0,0,0,0,4,9,23],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",1873,"Bengaluru B3",1,0,21,0,21,0,0,0,1,2],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",2010,"Kundli Feeder",323,0,3,0,3,0,0,14,35,76],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",2015,"Kolkata K4 - Feeder",0,0,0,0,0,0,0,0,0,0],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",2123,"Mumbai M10 - Feeder",1,0,1,0,1,0,0,0,0,0],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",2142,"Bengaluru B4",0,0,0,0,0,0,0,0,0,0],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",2468,"Nagpur N1 - Feeder",106,0,0,0,0,0,0,3,10,41],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",2470,"Ahmedabad A2 - Feeder",50,0,4,0,4,0,0,0,0,6],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",2576,"Noida N1 - Feeder",14,0,1,0,1,0,0,1,5,14],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",2670,"Visakhapatnam V1 - Feeder",0,0,2,0,2,0,0,0,0,0],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",2681,"Coimbatore C1 - Feeder",1,0,2,0,2,0,0,0,0,0],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",2960,"Patna P1 - Feeder",0,0,1,0,1,0,0,0,0,0],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",3127,"Bhubaneswar B1 - Feeder",0,0,0,0,0,0,0,0,0,0],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",3200,"Jaipur J3 - Feeder",46,0,0,0,0,0,0,4,5,9],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",3201,"Hyderabad H3 - Feeder",145,0,0,0,0,0,0,8,29,65],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",3262,"Chennai C5 - Feeder",0,0,0,0,0,0,0,0,0,0],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",4571,"Rajpura R2 - Feeder Warehouse",100,0,0,0,0,0,0,6,18,39],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",4572,"Pune P3 - Feeder Warehouse",122,0,0,0,0,0,0,13,26,33],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",4842,"Kolkata K6 - Feeder Warehouse",162,0,1,0,1,0,0,7,28,67],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",5096,"Faridabad - Feeder",29,0,0,0,0,0,0,4,16,84],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",5397,"Bengaluru B5 - Feeder",447,0,0,0,0,0,0,18,57,106],[10238376,"Imeco Reusable Bamboo Kitchen Towel Roll","Imeco","8906200790210","20 sheets",5406,"Mumbai M12 - Feeder Warehouse",7,191,0,0,0,0,0,1,3,13],[10238428,"Imeco Bamboo Paddle Hair Brush (Light Brown)","Imeco","8906200790128","1 pc",92,"Dasna 2",0,0,2,0,2,0,0,0,0,0],[10238428,"Imeco Bamboo Paddle Hair Brush (Light Brown)","Imeco","8906200790128","1 pc",1206,"Lucknow L4",1,0,1,0,1,0,0,0,0,0],[10238428,"Imeco Bamboo Paddle Hair Brush (Light Brown)","Imeco","8906200790128","1 pc",2010,"Kundli Feeder",21,300,11,0,11,0,0,11,54,116],[10238428,"Imeco Bamboo Paddle Hair Brush (Light Brown)","Imeco","8906200790128","1 pc",2015,"Kolkata K4 - Feeder",0,0,0,0,0,0,0,0,0,0],[10238428,"Imeco Bamboo Paddle Hair Brush (Light Brown)","Imeco","8906200790128","1 pc",2123,"Mumbai M10 - Feeder",3,0,0,0,0,0,0,0,0,0],[10238428,"Imeco Bamboo Paddle Hair Brush (Light Brown)","Imeco","8906200790128","1 pc",2142,"Bengaluru B4",0,0,0,0,0,0,0,0,0,0],[10238428,"Imeco Bamboo Paddle Hair Brush (Light Brown)","Imeco","8906200790128","1 pc",2468,"Nagpur N1 - Feeder",102,0,0,0,0,0,0,3,18,49],[10238428,"Imeco Bamboo Paddle Hair Brush (Light Brown)","Imeco","8906200790128","1 pc",2470,"Ahmedabad A2 - Feeder",44,0,0,0,0,0,0,0,0,0],[10238428,"Imeco Bamboo Paddle Hair Brush (Light Brown)","Imeco","8906200790128","1 pc",2960,"Patna P1 - Feeder",0,0,1,0,1,0,0,0,0,0],[10238428,"Imeco Bamboo Paddle Hair Brush (Light Brown)","Imeco","8906200790128","1 pc",3127,"Bhubaneswar B1 - Feeder",0,0,0,0,0,0,0,0,0,0],[10238428,"Imeco Bamboo Paddle Hair Brush (Light Brown)","Imeco","8906200790128","1 pc",3200,"Jaipur J3 - Feeder",0,28,3,0,3,0,0,0,0,0],[10238428,"Imeco Bamboo Paddle Hair Brush (Light Brown)","Imeco","8906200790128","1 pc",3201,"Hyderabad H3 - Feeder",89,0,15,0,15,0,0,0,0,2],[10238428,"Imeco Bamboo Paddle Hair Brush (Light Brown)","Imeco","8906200790128","1 pc",3262,"Chennai C5 - Feeder",0,0,0,0,0,0,0,0,0,0],[10238428,"Imeco Bamboo Paddle Hair Brush (Light Brown)","Imeco","8906200790128","1 pc",4571,"Rajpura R2 - Feeder Warehouse",40,0,0,0,0,0,0,0,0,0],[10238428,"Imeco Bamboo Paddle Hair Brush (Light Brown)","Imeco","8906200790128","1 pc",4572,"Pune P3 - Feeder Warehouse",0,0,2,0,2,0,0,0,0,0],[10238428,"Imeco Bamboo Paddle Hair Brush (Light Brown)","Imeco","8906200790128","1 pc",4842,"Kolkata K6 - Feeder Warehouse",347,0,1,0,1,0,0,9,44,363],[10238428,"Imeco Bamboo Paddle Hair Brush (Light Brown)","Imeco","8906200790128","1 pc",5096,"Faridabad - Feeder",1,0,0,0,0,0,0,0,0,1],[10238428,"Imeco Bamboo Paddle Hair Brush (Light Brown)","Imeco","8906200790128","1 pc",5397,"Bengaluru B5 - Feeder",185,0,8,0,8,0,0,2,5,21],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",92,"Dasna 2",0,0,1,0,1,0,0,0,0,0],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",1206,"Lucknow L4",76,0,0,0,0,0,0,9,13,40],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",1872,"Pune P2 - Feeder",0,0,1,0,1,0,0,0,0,0],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",2010,"Kundli Feeder",505,0,0,0,0,0,0,44,124,196],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",2015,"Kolkata K4 - Feeder",0,0,2,0,2,0,0,0,0,0],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",2123,"Mumbai M10 - Feeder",4,0,5,0,5,0,0,0,0,1],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",2142,"Bengaluru B4",0,0,0,0,0,0,0,0,0,0],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",2468,"Nagpur N1 - Feeder",74,0,0,0,0,0,0,4,17,42],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",2470,"Ahmedabad A2 - Feeder",141,0,0,0,0,0,0,22,40,41],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",2576,"Noida N1 - Feeder",2,0,0,0,0,0,0,0,1,8],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",2670,"Visakhapatnam V1 - Feeder",1,0,0,0,0,0,0,0,0,2],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",2681,"Coimbatore C1 - Feeder",0,0,1,0,1,0,0,0,0,0],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",2960,"Patna P1 - Feeder",31,0,4,0,4,0,0,0,3,29],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",3200,"Jaipur J3 - Feeder",18,4,0,0,0,0,0,8,9,9],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",3201,"Hyderabad H3 - Feeder",220,0,0,0,0,0,0,16,64,142],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",3262,"Chennai C5 - Feeder",0,0,0,0,0,0,0,0,0,0],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",3821,"Bhopal B1 - Feeder",0,0,2,0,2,0,0,0,0,0],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",4571,"Rajpura R2 - Feeder Warehouse",101,0,0,0,0,0,0,9,32,56],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",4572,"Pune P3 - Feeder Warehouse",53,0,0,0,0,0,0,20,20,20],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",4842,"Kolkata K6 - Feeder Warehouse",1007,0,0,0,0,0,0,9,15,34],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",5096,"Faridabad - Feeder",48,144,0,0,0,0,0,14,57,169],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",5397,"Bengaluru B5 - Feeder",257,0,0,0,0,0,0,31,62,112],[10242839,"Imeco Bamboo Wet Wipes (with Aloe Vera)","Imeco","8906200790067","30 wipes",5406,"Mumbai M12 - Feeder Warehouse",3,119,0,0,0,0,0,0,1,7],[10245984,"Imeco Bamboo Face Tissue Paper - Buy 3 Get 3 Free","Imeco","8906200790029","6 x 100 pulls",92,"Dasna 2",0,0,0,0,0,0,0,0,0,0],[10245984,"Imeco Bamboo Face Tissue Paper - Buy 3 Get 3 Free","Imeco","8906200790029","6 x 100 pulls",1206,"Lucknow L4",2,0,0,0,0,0,0,0,0,2],[10245984,"Imeco Bamboo Face Tissue Paper - Buy 3 Get 3 Free","Imeco","8906200790029","6 x 100 pulls",2123,"Mumbai M10 - Feeder",0,0,8,0,8,0,0,0,0,0],[10245984,"Imeco Bamboo Face Tissue Paper - Buy 3 Get 3 Free","Imeco","8906200790029","6 x 100 pulls",2576,"Noida N1 - Feeder",1,0,0,0,0,0,0,0,0,0],[10245984,"Imeco Bamboo Face Tissue Paper - Buy 3 Get 3 Free","Imeco","8906200790029","6 x 100 pulls",2960,"Patna P1 - Feeder",2,0,0,0,0,0,0,0,0,0],[10245984,"Imeco Bamboo Face Tissue Paper - Buy 3 Get 3 Free","Imeco","8906200790029","6 x 100 pulls",3127,"Bhubaneswar B1 - Feeder",0,0,0,0,0,0,0,0,0,0],[10245984,"Imeco Bamboo Face Tissue Paper - Buy 3 Get 3 Free","Imeco","8906200790029","6 x 100 pulls",3262,"Chennai C5 - Feeder",0,0,0,0,0,0,0,0,0,0],[10245984,"Imeco Bamboo Face Tissue Paper - Buy 3 Get 3 Free","Imeco","8906200790029","6 x 100 pulls",4842,"Kolkata K6 - Feeder Warehouse",140,0,0,0,0,0,0,0,0,0],[10245984,"Imeco Bamboo Face Tissue Paper - Buy 3 Get 3 Free","Imeco","8906200790029","6 x 100 pulls",5096,"Faridabad - Feeder",0,0,6,0,6,0,0,1,1,5],[10245984,"Imeco Bamboo Face Tissue Paper - Buy 3 Get 3 Free","Imeco","8906200790029","6 x 100 pulls",5397,"Bengaluru B5 - Feeder",2,0,0,0,0,0,0,0,0,10],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",1873,"Bengaluru B3",4,0,0,0,0,0,0,1,1,1],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",2010,"Kundli Feeder",23,0,0,0,0,0,0,15,48,99],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",2015,"Kolkata K4 - Feeder",1,0,5,0,5,0,0,0,0,0],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",2123,"Mumbai M10 - Feeder",0,0,0,0,0,0,0,0,0,1],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",2142,"Bengaluru B4",0,0,0,0,0,0,0,0,0,0],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",2468,"Nagpur N1 - Feeder",0,0,0,0,0,0,0,0,0,1],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",2470,"Ahmedabad A2 - Feeder",130,0,0,0,0,0,0,16,38,38],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",2576,"Noida N1 - Feeder",0,0,0,0,0,0,0,0,0,1],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",2670,"Visakhapatnam V1 - Feeder",0,0,5,0,5,0,0,0,0,0],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",2960,"Patna P1 - Feeder",4,0,0,0,0,0,0,0,0,1],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",3127,"Bhubaneswar B1 - Feeder",0,0,0,0,0,0,0,0,0,0],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",3200,"Jaipur J3 - Feeder",22,2,0,0,0,0,0,6,12,13],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",3201,"Hyderabad H3 - Feeder",2,0,21,0,21,0,0,0,0,3],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",3262,"Chennai C5 - Feeder",0,0,0,0,0,0,0,0,0,0],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",4571,"Rajpura R2 - Feeder Warehouse",9,0,0,0,0,0,0,0,10,43],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",4572,"Pune P3 - Feeder Warehouse",0,0,0,0,0,0,0,0,0,0],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",4842,"Kolkata K6 - Feeder Warehouse",3,0,0,0,0,0,0,0,0,1],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",5096,"Faridabad - Feeder",0,0,0,0,0,0,0,0,0,2],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",5397,"Bengaluru B5 - Feeder",2,0,0,0,0,0,0,0,2,3],[10248588,"Imeco Bamboo Face Tissue Box","Imeco","8906200790036","1 pc",5406,"Mumbai M12 - Feeder Warehouse",4,0,0,0,0,0,0,0,0,0],[10249837,"Dencrus Octa Clean Soft Bamboo Toothbrush Set - Pack of 5","Dencrus","8906200790135","5 pcs",1873,"Bengaluru B3",0,0,1,0,1,0,0,0,0,0],[10249837,"Dencrus Octa Clean Soft Bamboo Toothbrush Set - Pack of 5","Dencrus","8906200790135","5 pcs",2123,"Mumbai M10 - Feeder",0,0,12,0,12,0,0,0,0,0],[10249837,"Dencrus Octa Clean Soft Bamboo Toothbrush Set - Pack of 5","Dencrus","8906200790135","5 pcs",2468,"Nagpur N1 - Feeder",1,0,1,0,1,0,0,1,2,2],[10249837,"Dencrus Octa Clean Soft Bamboo Toothbrush Set - Pack of 5","Dencrus","8906200790135","5 pcs",2470,"Ahmedabad A2 - Feeder",0,0,10,0,10,0,0,0,0,0],[10249837,"Dencrus Octa Clean Soft Bamboo Toothbrush Set - Pack of 5","Dencrus","8906200790135","5 pcs",3201,"Hyderabad H3 - Feeder",0,0,3,0,3,0,0,0,0,0],[10249837,"Dencrus Octa Clean Soft Bamboo Toothbrush Set - Pack of 5","Dencrus","8906200790135","5 pcs",3262,"Chennai C5 - Feeder",6,0,0,0,0,0,0,0,2,3],[10249837,"Dencrus Octa Clean Soft Bamboo Toothbrush Set - Pack of 5","Dencrus","8906200790135","5 pcs",5096,"Faridabad - Feeder",0,0,3,0,3,0,0,0,0,1],[10249837,"Dencrus Octa Clean Soft Bamboo Toothbrush Set - Pack of 5","Dencrus","8906200790135","5 pcs",5397,"Bengaluru B5 - Feeder",0,0,3,0,3,0,0,0,0,0],[10249839,"Dencrus Soft Bamboo Charcoal Toothbrush Set - Pack of 5","Dencrus","8906200790548","5 pcs",92,"Dasna 2",0,0,0,0,0,0,0,0,0,0],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",92,"Dasna 2",0,0,0,0,0,0,0,0,0,0],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",1206,"Lucknow L4",163,0,0,0,0,0,0,19,40,88],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",1872,"Pune P2 - Feeder",0,0,1,0,1,0,0,0,0,0],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",1873,"Bengaluru B3",0,0,0,0,0,0,0,0,0,0],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",2010,"Kundli Feeder",879,0,0,0,0,0,0,101,242,426],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",2015,"Kolkata K4 - Feeder",0,0,0,0,0,0,0,0,0,0],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",2123,"Mumbai M10 - Feeder",0,0,1,0,1,0,0,0,0,0],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",2468,"Nagpur N1 - Feeder",98,0,0,0,0,0,0,11,20,55],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",2470,"Ahmedabad A2 - Feeder",78,0,0,0,0,0,0,22,39,42],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",2576,"Noida N1 - Feeder",7,0,0,0,0,0,0,0,2,2],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",3200,"Jaipur J3 - Feeder",85,0,2,0,2,0,0,9,10,16],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",3201,"Hyderabad H3 - Feeder",80,0,2,0,2,0,0,5,11,76],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",3262,"Chennai C5 - Feeder",0,0,0,0,0,0,0,0,0,0],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",4571,"Rajpura R2 - Feeder Warehouse",104,0,0,0,0,0,0,11,35,105],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",4572,"Pune P3 - Feeder Warehouse",78,0,0,0,0,0,0,30,38,65],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",4842,"Kolkata K6 - Feeder Warehouse",179,0,0,0,0,0,0,11,20,128],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",5096,"Faridabad - Feeder",4,144,46,0,46,0,0,3,4,43],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",5397,"Bengaluru B5 - Feeder",590,0,0,0,0,0,0,101,227,383],[10251418,"Imeco Bamboo Pocket Tissue","Imeco","8906200790050","10 x 10 sheets",5406,"Mumbai M12 - Feeder Warehouse",3,131,0,0,0,0,0,0,0,0],[10258040,"Imeco Eco Sipper Ultra Tumbler with Straw (Blue & Pink)","Imeco","8906200791187","1 pc",2123,"Mumbai M10 - Feeder",0,0,0,0,0,0,0,0,0,0],[10262756,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791477","3 x 30 pcs",1206,"Lucknow L4",783,0,0,0,0,0,0,37,109,590],[10262756,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791477","3 x 30 pcs",1873,"Bengaluru B3",0,0,1,0,1,0,0,0,0,0],[10262756,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791477","3 x 30 pcs",2010,"Kundli Feeder",597,240,0,0,0,0,0,78,320,610],[10262756,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791477","3 x 30 pcs",2015,"Kolkata K4 - Feeder",0,0,32,0,32,0,0,0,0,0],[10262756,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791477","3 x 30 pcs",2123,"Mumbai M10 - Feeder",0,0,0,0,0,0,0,0,0,0],[10262756,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791477","3 x 30 pcs",2468,"Nagpur N1 - Feeder",507,0,0,0,0,0,0,31,153,444],[10262756,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791477","3 x 30 pcs",2470,"Ahmedabad A2 - Feeder",503,0,0,0,0,0,0,37,113,113],[10262756,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791477","3 x 30 pcs",2576,"Noida N1 - Feeder",0,0,0,0,0,0,0,0,0,0],[10262756,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791477","3 x 30 pcs",3200,"Jaipur J3 - Feeder",18,0,1,0,1,0,0,12,18,18],[10262756,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791477","3 x 30 pcs",3201,"Hyderabad H3 - Feeder",236,0,0,0,0,0,0,3,23,170],[10262756,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791477","3 x 30 pcs",4571,"Rajpura R2 - Feeder Warehouse",258,0,0,0,0,0,0,3,48,299],[10262756,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791477","3 x 30 pcs",4572,"Pune P3 - Feeder Warehouse",381,0,0,0,0,0,0,28,69,289],[10262756,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791477","3 x 30 pcs",4842,"Kolkata K6 - Feeder Warehouse",877,0,0,0,0,0,0,53,231,509],[10262756,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791477","3 x 30 pcs",5096,"Faridabad - Feeder",15,744,0,0,0,0,0,7,54,477],[10262756,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791477","3 x 30 pcs",5397,"Bengaluru B5 - Feeder",268,0,8,0,8,0,0,12,32,429],[10262756,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791477","3 x 30 pcs",5406,"Mumbai M12 - Feeder Warehouse",0,775,0,0,0,0,0,0,0,2],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",1206,"Lucknow L4",0,0,11,0,11,0,0,0,0,0],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",1873,"Bengaluru B3",0,0,36,0,36,0,0,0,0,0],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",2010,"Kundli Feeder",0,0,11,0,11,0,0,0,0,0],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",2015,"Kolkata K4 - Feeder",0,0,34,0,34,0,0,0,0,0],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",2123,"Mumbai M10 - Feeder",5,0,13,0,13,0,0,0,0,0],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",2468,"Nagpur N1 - Feeder",0,0,8,0,8,0,0,0,0,0],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",2470,"Ahmedabad A2 - Feeder",2,0,27,0,27,0,0,0,0,0],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",2576,"Noida N1 - Feeder",4,0,16,0,16,0,0,0,1,5],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",2670,"Visakhapatnam V1 - Feeder",0,0,9,0,9,0,0,0,0,0],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",2960,"Patna P1 - Feeder",0,0,7,0,7,0,0,0,0,0],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",3200,"Jaipur J3 - Feeder",23,0,4,0,4,0,0,8,8,8],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",3201,"Hyderabad H3 - Feeder",0,0,36,0,36,0,0,0,0,0],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",3262,"Chennai C5 - Feeder",1,0,7,0,7,0,0,1,1,2],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",4571,"Rajpura R2 - Feeder Warehouse",0,0,7,0,7,0,0,0,0,0],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",4572,"Pune P3 - Feeder Warehouse",0,0,14,0,14,0,0,0,0,0],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",4842,"Kolkata K6 - Feeder Warehouse",2,0,0,0,0,0,0,0,1,3],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",5096,"Faridabad - Feeder",0,0,64,0,64,0,0,0,0,0],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",5397,"Bengaluru B5 - Feeder",0,0,0,0,0,0,0,0,0,0],[10263590,"Imeco Bamboo Face Tissue Box","Imeco","8906200791538","100 pulls",5406,"Mumbai M12 - Feeder Warehouse",2,0,18,0,18,0,0,0,0,0],[10266560,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791491","90 pcs",1206,"Lucknow L4",7,0,0,0,0,0,0,34,35,84],[10266560,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791491","90 pcs",1873,"Bengaluru B3",0,0,29,0,29,0,0,0,0,3],[10266560,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791491","90 pcs",2010,"Kundli Feeder",919,480,0,0,0,0,0,253,853,1662],[10266560,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791491","90 pcs",2015,"Kolkata K4 - Feeder",0,0,0,0,0,0,0,0,0,0],[10266560,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791491","90 pcs",2123,"Mumbai M10 - Feeder",0,0,2,0,2,0,0,0,0,0],[10266560,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791491","90 pcs",2468,"Nagpur N1 - Feeder",917,0,0,0,0,0,0,92,351,909],[10266560,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791491","90 pcs",2470,"Ahmedabad A2 - Feeder",105,0,0,0,0,0,0,5,46,46],[10266560,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791491","90 pcs",2960,"Patna P1 - Feeder",2,0,0,0,0,0,0,0,0,0],[10266560,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791491","90 pcs",3200,"Jaipur J3 - Feeder",11,0,1,0,1,0,0,12,24,24],[10266560,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791491","90 pcs",3201,"Hyderabad H3 - Feeder",1213,0,0,0,0,0,0,100,391,1058],[10266560,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791491","90 pcs",4571,"Rajpura R2 - Feeder Warehouse",196,0,1,0,1,0,0,0,0,118],[10266560,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791491","90 pcs",4572,"Pune P3 - Feeder Warehouse",604,0,0,0,0,0,0,79,143,506],[10266560,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791491","90 pcs",4842,"Kolkata K6 - Feeder Warehouse",2262,0,0,0,0,0,0,171,704,1464],[10266560,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791491","90 pcs",5096,"Faridabad - Feeder",53,2352,0,0,0,0,0,13,251,1616],[10266560,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791491","90 pcs",5397,"Bengaluru B5 - Feeder",2741,0,0,0,0,0,0,319,1099,1951],[10266560,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791491","90 pcs",5406,"Mumbai M12 - Feeder Warehouse",0,200,0,0,0,0,0,0,0,0],[10267085,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791514","3 x 15 pcs",264,"Farukhnagar - SR",0,0,8,0,8,0,0,0,0,0],[10267085,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791514","3 x 15 pcs",1206,"Lucknow L4",557,0,0,0,0,0,0,67,83,387],[10267085,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791514","3 x 15 pcs",1873,"Bengaluru B3",0,0,9,0,9,0,0,0,0,0],[10267085,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791514","3 x 15 pcs",2010,"Kundli Feeder",1180,200,0,0,0,0,0,249,656,1036],[10267085,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791514","3 x 15 pcs",2015,"Kolkata K4 - Feeder",0,0,16,0,16,0,0,0,0,0],[10267085,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791514","3 x 15 pcs",2123,"Mumbai M10 - Feeder",0,0,1,0,1,0,0,0,0,0],[10267085,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791514","3 x 15 pcs",2468,"Nagpur N1 - Feeder",324,0,0,0,0,0,0,31,118,332],[10267085,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791514","3 x 15 pcs",2470,"Ahmedabad A2 - Feeder",151,0,0,0,0,0,0,42,100,100],[10267085,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791514","3 x 15 pcs",2576,"Noida N1 - Feeder",0,0,5,0,5,0,0,0,0,0],[10267085,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791514","3 x 15 pcs",3200,"Jaipur J3 - Feeder",13,1,0,0,0,0,0,14,18,18],[10267085,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791514","3 x 15 pcs",3201,"Hyderabad H3 - Feeder",441,0,0,0,0,0,0,82,194,454],[10267085,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791514","3 x 15 pcs",4571,"Rajpura R2 - Feeder Warehouse",211,0,0,0,0,0,0,4,58,370],[10267085,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791514","3 x 15 pcs",4572,"Pune P3 - Feeder Warehouse",174,0,0,0,0,0,0,51,138,343],[10267085,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791514","3 x 15 pcs",4842,"Kolkata K6 - Feeder Warehouse",670,0,0,0,0,0,0,73,227,699],[10267085,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791514","3 x 15 pcs",5096,"Faridabad - Feeder",4,460,4,0,4,0,0,0,3,73],[10267085,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791514","3 x 15 pcs",5397,"Bengaluru B5 - Feeder",1695,0,0,0,0,0,0,217,571,1189],[10267085,"Imeco Compostable Garbage Bag (Green)","Imeco","8906200791514","3 x 15 pcs",5406,"Mumbai M12 - Feeder Warehouse",0,577,0,0,0,0,0,0,0,3],[10268903,"Imeco Ultra Soft Bamboo Face Tissue Paper - 600 Pulls","Imeco","8906200790203","3 x 200 pulls",1206,"Lucknow L4",165,0,0,0,0,0,0,10,32,63],[10268903,"Imeco Ultra Soft Bamboo Face Tissue Paper - 600 Pulls","Imeco","8906200790203","3 x 200 pulls",2010,"Kundli Feeder",106,0,0,0,0,0,0,28,102,163],[10268903,"Imeco Ultra Soft Bamboo Face Tissue Paper - 600 Pulls","Imeco","8906200790203","3 x 200 pulls",2468,"Nagpur N1 - Feeder",2,0,0,0,0,0,0,0,0,4],[10268903,"Imeco Ultra Soft Bamboo Face Tissue Paper - 600 Pulls","Imeco","8906200790203","3 x 200 pulls",2470,"Ahmedabad A2 - Feeder",18,0,0,0,0,0,0,7,27,27],[10268903,"Imeco Ultra Soft Bamboo Face Tissue Paper - 600 Pulls","Imeco","8906200790203","3 x 200 pulls",3200,"Jaipur J3 - Feeder",11,10,0,0,0,0,0,8,9,9],[10268903,"Imeco Ultra Soft Bamboo Face Tissue Paper - 600 Pulls","Imeco","8906200790203","3 x 200 pulls",3201,"Hyderabad H3 - Feeder",48,0,0,0,0,0,0,19,62,153],[10268903,"Imeco Ultra Soft Bamboo Face Tissue Paper - 600 Pulls","Imeco","8906200790203","3 x 200 pulls",4571,"Rajpura R2 - Feeder Warehouse",89,0,0,0,0,0,0,8,38,75],[10268903,"Imeco Ultra Soft Bamboo Face Tissue Paper - 600 Pulls","Imeco","8906200790203","3 x 200 pulls",4572,"Pune P3 - Feeder Warehouse",10,0,0,0,0,0,0,5,16,96],[10268903,"Imeco Ultra Soft Bamboo Face Tissue Paper - 600 Pulls","Imeco","8906200790203","3 x 200 pulls",4842,"Kolkata K6 - Feeder Warehouse",36,0,0,0,0,0,0,17,80,269],[10268903,"Imeco Ultra Soft Bamboo Face Tissue Paper - 600 Pulls","Imeco","8906200790203","3 x 200 pulls",5096,"Faridabad - Feeder",76,0,0,0,0,0,0,33,100,327],[10268903,"Imeco Ultra Soft Bamboo Face Tissue Paper - 600 Pulls","Imeco","8906200790203","3 x 200 pulls",5397,"Bengaluru B5 - Feeder",46,0,0,0,0,0,0,13,69,228],[10268903,"Imeco Ultra Soft Bamboo Face Tissue Paper - 600 Pulls","Imeco","8906200790203","3 x 200 pulls",5406,"Mumbai M12 - Feeder Warehouse",1,102,0,0,0,0,0,0,0,0],[10276242,"Imeco Steel Wall Bottle (Black)","Imeco","8906200791071","1 pc",1873,"Bengaluru B3",0,0,0,0,0,0,0,0,0,0],[10277180,"Imeco Bamboo Toilet Rolls (3 Ply)","Imeco","8906200790869","6 x 160 pulls",1206,"Lucknow L4",118,0,0,0,0,0,0,15,23,73],[10277180,"Imeco Bamboo Toilet Rolls (3 Ply)","Imeco","8906200790869","6 x 160 pulls",1873,"Bengaluru B3",0,0,3,0,3,0,0,0,0,0],[10277180,"Imeco Bamboo Toilet Rolls (3 Ply)","Imeco","8906200790869","6 x 160 pulls",2010,"Kundli Feeder",326,224,0,0,0,0,0,71,168,337],[10277180,"Imeco Bamboo Toilet Rolls (3 Ply)","Imeco","8906200790869","6 x 160 pulls",2468,"Nagpur N1 - Feeder",86,0,0,0,0,0,0,3,15,46],[10277180,"Imeco Bamboo Toilet Rolls (3 Ply)","Imeco","8906200790869","6 x 160 pulls",2470,"Ahmedabad A2 - Feeder",57,0,0,0,0,0,0,5,16,21],[10277180,"Imeco Bamboo Toilet Rolls (3 Ply)","Imeco","8906200790869","6 x 160 pulls",3200,"Jaipur J3 - Feeder",26,0,0,0,0,0,0,5,6,6],[10277180,"Imeco Bamboo Toilet Rolls (3 Ply)","Imeco","8906200790869","6 x 160 pulls",3201,"Hyderabad H3 - Feeder",108,0,0,0,0,0,0,10,21,59],[10277180,"Imeco Bamboo Toilet Rolls (3 Ply)","Imeco","8906200790869","6 x 160 pulls",3262,"Chennai C5 - Feeder",0,0,1,0,1,0,0,0,0,0],[10277180,"Imeco Bamboo Toilet Rolls (3 Ply)","Imeco","8906200790869","6 x 160 pulls",4571,"Rajpura R2 - Feeder Warehouse",172,0,0,0,0,0,0,6,18,107],[10277180,"Imeco Bamboo Toilet Rolls (3 Ply)","Imeco","8906200790869","6 x 160 pulls",4572,"Pune P3 - Feeder Warehouse",112,0,0,0,0,0,0,34,61,114],[10277180,"Imeco Bamboo Toilet Rolls (3 Ply)","Imeco","8906200790869","6 x 160 pulls",4842,"Kolkata K6 - Feeder Warehouse",143,0,1,0,1,0,0,5,12,89],[10277180,"Imeco Bamboo Toilet Rolls (3 Ply)","Imeco","8906200790869","6 x 160 pulls",5096,"Faridabad - Feeder",14,544,0,0,0,0,0,2,13,244],[10277180,"Imeco Bamboo Toilet Rolls (3 Ply)","Imeco","8906200790869","6 x 160 pulls",5397,"Bengaluru B5 - Feeder",343,0,0,0,0,0,0,34,89,187],[10277180,"Imeco Bamboo Toilet Rolls (3 Ply)","Imeco","8906200790869","6 x 160 pulls",5406,"Mumbai M12 - Feeder Warehouse",1,141,0,0,0,0,0,0,0,3],[10282442,"Imeco Stainless Steel Tongue Cleaner Set","Imeco","8906200791668","2 pcs",1873,"Bengaluru B3",0,0,2,0,2,0,0,0,0,0],[10282442,"Imeco Stainless Steel Tongue Cleaner Set","Imeco","8906200791668","2 pcs",3201,"Hyderabad H3 - Feeder",1,0,0,0,0,0,0,1,6,200],[10282442,"Imeco Stainless Steel Tongue Cleaner Set","Imeco","8906200791668","2 pcs",5397,"Bengaluru B5 - Feeder",130,0,0,0,0,0,0,36,144,298],[10284654,"Imeco Hydrating Bamboo Wet Wipes","Imeco","8906200791699","3 x 30 wipes",1206,"Lucknow L4",53,0,2,0,2,0,0,5,16,44],[10284654,"Imeco Hydrating Bamboo Wet Wipes","Imeco","8906200791699","3 x 30 wipes",1873,"Bengaluru B3",0,0,24,0,24,0,0,0,0,0],[10284654,"Imeco Hydrating Bamboo Wet Wipes","Imeco","8906200791699","3 x 30 wipes",2010,"Kundli Feeder",44,264,2,0,2,0,0,13,70,103],[10284654,"Imeco Hydrating Bamboo Wet Wipes","Imeco","8906200791699","3 x 30 wipes",2468,"Nagpur N1 - Feeder",40,0,0,0,0,0,0,5,14,26],[10284654,"Imeco Hydrating Bamboo Wet Wipes","Imeco","8906200791699","3 x 30 wipes",2470,"Ahmedabad A2 - Feeder",102,0,1,0,1,0,0,5,29,29],[10284654,"Imeco Hydrating Bamboo Wet Wipes","Imeco","8906200791699","3 x 30 wipes",2576,"Noida N1 - Feeder",0,0,6,0,6,0,0,0,0,0],[10284654,"Imeco Hydrating Bamboo Wet Wipes","Imeco","8906200791699","3 x 30 wipes",3200,"Jaipur J3 - Feeder",26,2,3,0,3,0,0,2,2,2],[10284654,"Imeco Hydrating Bamboo Wet Wipes","Imeco","8906200791699","3 x 30 wipes",3201,"Hyderabad H3 - Feeder",161,0,39,0,39,0,0,4,12,101],[10284654,"Imeco Hydrating Bamboo Wet Wipes","Imeco","8906200791699","3 x 30 wipes",4571,"Rajpura R2 - Feeder Warehouse",87,0,2,1,1,0,0,2,15,43],[10284654,"Imeco Hydrating Bamboo Wet Wipes","Imeco","8906200791699","3 x 30 wipes",4572,"Pune P3 - Feeder Warehouse",47,0,0,0,0,0,0,9,12,12],[10284654,"Imeco Hydrating Bamboo Wet Wipes","Imeco","8906200791699","3 x 30 wipes",4842,"Kolkata K6 - Feeder Warehouse",151,0,10,0,10,0,0,1,5,8],[10284654,"Imeco Hydrating Bamboo Wet Wipes","Imeco","8906200791699","3 x 30 wipes",5096,"Faridabad - Feeder",29,312,6,0,6,0,0,11,60,211],[10284654,"Imeco Hydrating Bamboo Wet Wipes","Imeco","8906200791699","3 x 30 wipes",5397,"Bengaluru B5 - Feeder",370,0,9,0,9,0,0,27,82,151],[10284654,"Imeco Hydrating Bamboo Wet Wipes","Imeco","8906200791699","3 x 30 wipes",5406,"Mumbai M12 - Feeder Warehouse",2,0,8,0,8,0,0,0,2,4],[10287161,"Dencrus Orby Plus Bamboo Toothbrush Set","Dencrus","8906200791804","5 pcs",1873,"Bengaluru B3",0,0,1,0,1,0,0,0,0,0],[10287614,"Imeco Round Bamboo Disposable Plates (10\")","Imeco","8906200791750","25 pcs",2010,"Kundli Feeder",0,0,1,0,1,0,0,0,0,0],[10287614,"Imeco Round Bamboo Disposable Plates (10\")","Imeco","8906200791750","25 pcs",2468,"Nagpur N1 - Feeder",0,0,1,0,1,0,0,0,0,0],[10287614,"Imeco Round Bamboo Disposable Plates (10\")","Imeco","8906200791750","25 pcs",4842,"Kolkata K6 - Feeder Warehouse",0,0,1,0,1,0,0,0,0,2],[10287614,"Imeco Round Bamboo Disposable Plates (10\")","Imeco","8906200791750","25 pcs",5096,"Faridabad - Feeder",1,0,0,0,0,0,0,0,0,0],[10287925,"Imeco Coffee Disposable Glass","Imeco","8906200791798","10 pcs",2123,"Mumbai M10 - Feeder",4,0,0,0,0,0,0,0,0,0],[10288662,"Imeco Bamboo Kitchen Tissue Roll","Imeco","8906200791637","6 x 60 pulls",1206,"Lucknow L4",65,0,0,0,0,0,0,1,5,15],[10288662,"Imeco Bamboo Kitchen Tissue Roll","Imeco","8906200791637","6 x 60 pulls",2010,"Kundli Feeder",296,0,0,0,0,0,0,8,19,40],[10288662,"Imeco Bamboo Kitchen Tissue Roll","Imeco","8906200791637","6 x 60 pulls",2468,"Nagpur N1 - Feeder",44,0,0,0,0,0,0,1,4,10],[10288662,"Imeco Bamboo Kitchen Tissue Roll","Imeco","8906200791637","6 x 60 pulls",2470,"Ahmedabad A2 - Feeder",54,0,0,0,0,0,0,2,9,14],[10288662,"Imeco Bamboo Kitchen Tissue Roll","Imeco","8906200791637","6 x 60 pulls",3200,"Jaipur J3 - Feeder",29,1,0,0,0,0,0,0,0,1],[10288662,"Imeco Bamboo Kitchen Tissue Roll","Imeco","8906200791637","6 x 60 pulls",3201,"Hyderabad H3 - Feeder",96,0,1,0,1,0,0,4,9,30],[10288662,"Imeco Bamboo Kitchen Tissue Roll","Imeco","8906200791637","6 x 60 pulls",4571,"Rajpura R2 - Feeder Warehouse",58,0,0,0,0,0,0,1,6,16],[10288662,"Imeco Bamboo Kitchen Tissue Roll","Imeco","8906200791637","6 x 60 pulls",4572,"Pune P3 - Feeder Warehouse",72,0,0,0,0,0,0,7,9,25],[10288662,"Imeco Bamboo Kitchen Tissue Roll","Imeco","8906200791637","6 x 60 pulls",4842,"Kolkata K6 - Feeder Warehouse",116,0,1,0,1,0,0,6,16,26],[10288662,"Imeco Bamboo Kitchen Tissue Roll","Imeco","8906200791637","6 x 60 pulls",5096,"Faridabad - Feeder",49,120,0,0,0,0,0,2,10,60],[10288662,"Imeco Bamboo Kitchen Tissue Roll","Imeco","8906200791637","6 x 60 pulls",5397,"Bengaluru B5 - Feeder",182,0,1,0,1,0,0,5,13,43],[10288662,"Imeco Bamboo Kitchen Tissue Roll","Imeco","8906200791637","6 x 60 pulls",5406,"Mumbai M12 - Feeder Warehouse",14,120,0,0,0,0,0,0,4,14],[10303242,"Imeco Bamboo Oval Paddle Hair Brush (Brown)","Imeco","8906200791828","1 pc",4572,"Pune P3 - Feeder Warehouse",6,0,0,0,0,0,0,0,6,52],[10305881,"Imeco Soft Bamboo Face Tissue Box","Imeco","8906200790012","200 pulls",3201,"Hyderabad H3 - Feeder",40,0,0,0,0,0,0,1,3,15],[10305881,"Imeco Soft Bamboo Face Tissue Box","Imeco","8906200790012","200 pulls",4572,"Pune P3 - Feeder Warehouse",47,0,0,0,0,0,0,5,5,5],[10305881,"Imeco Soft Bamboo Face Tissue Box","Imeco","8906200790012","200 pulls",5397,"Bengaluru B5 - Feeder",37,0,0,0,0,0,0,2,6,39],[10306791,"Imeco Good Habbit Garbage Bag","Imeco","8906200791989","3 x 30 pcs",3201,"Hyderabad H3 - Feeder",222,0,0,0,0,0,0,6,64,201],[10306792,"Imeco Good Habbit Garbage Bag","Imeco","8906200791972","3 x 30 pcs",2470,"Ahmedabad A2 - Feeder",30,0,0,0,0,0,0,0,0,0],[10306792,"Imeco Good Habbit Garbage Bag","Imeco","8906200791972","3 x 30 pcs",4572,"Pune P3 - Feeder Warehouse",32,0,0,0,0,0,0,5,16,16],[10306792,"Imeco Good Habbit Garbage Bag","Imeco","8906200791972","3 x 30 pcs",5406,"Mumbai M12 - Feeder Warehouse",0,256,0,0,0,0,0,0,1,5],[10312409,"Imeco 2 in 1 Bamboo Toilet Tissue - Roll","Imeco","8906200791927","2 x 160 pulls",4842,"Kolkata K6 - Feeder Warehouse",0,0,1,0,1,0,0,0,0,0],[10313470,"Imeco Non-Woven Kitchen Towel Roll","Imeco","8906200791835","80 pulls",5397,"Bengaluru B5 - Feeder",75,0,0,0,0,0,0,0,0,0],[10315490,"Imeco Moisturising Baby Wipes with Aloe Vera","Imeco","8906200791675","3 x 72 wipes",1206,"Lucknow L4",75,0,0,0,0,0,0,1,1,25],[10315490,"Imeco Moisturising Baby Wipes with Aloe Vera","Imeco","8906200791675","3 x 72 wipes",2010,"Kundli Feeder",40,192,0,0,0,0,0,2,33,58],[10315490,"Imeco Moisturising Baby Wipes with Aloe Vera","Imeco","8906200791675","3 x 72 wipes",2468,"Nagpur N1 - Feeder",63,0,0,0,0,0,0,1,5,13],[10315490,"Imeco Moisturising Baby Wipes with Aloe Vera","Imeco","8906200791675","3 x 72 wipes",2470,"Ahmedabad A2 - Feeder",42,0,0,0,0,0,0,0,0,0],[10315490,"Imeco Moisturising Baby Wipes with Aloe Vera","Imeco","8906200791675","3 x 72 wipes",3200,"Jaipur J3 - Feeder",16,6,0,0,0,0,0,1,1,1],[10315490,"Imeco Moisturising Baby Wipes with Aloe Vera","Imeco","8906200791675","3 x 72 wipes",3201,"Hyderabad H3 - Feeder",132,0,0,0,0,0,0,6,28,35],[10315490,"Imeco Moisturising Baby Wipes with Aloe Vera","Imeco","8906200791675","3 x 72 wipes",4571,"Rajpura R2 - Feeder Warehouse",28,0,0,0,0,0,0,1,1,23],[10315490,"Imeco Moisturising Baby Wipes with Aloe Vera","Imeco","8906200791675","3 x 72 wipes",4572,"Pune P3 - Feeder Warehouse",46,0,0,0,0,0,0,1,6,6],[10315490,"Imeco Moisturising Baby Wipes with Aloe Vera","Imeco","8906200791675","3 x 72 wipes",4842,"Kolkata K6 - Feeder Warehouse",116,0,7,0,7,0,0,2,17,97],[10315490,"Imeco Moisturising Baby Wipes with Aloe Vera","Imeco","8906200791675","3 x 72 wipes",5096,"Faridabad - Feeder",0,86,0,0,0,0,0,0,0,0],[10315490,"Imeco Moisturising Baby Wipes with Aloe Vera","Imeco","8906200791675","3 x 72 wipes",5397,"Bengaluru B5 - Feeder",205,0,2,2,0,0,0,3,18,40],[10320448,"Imeco Good Habbit Face Tissue Paper","Imeco","8906200791866","6 x 100 pulls",4572,"Pune P3 - Feeder Warehouse",30,0,0,0,0,0,0,12,20,20],[10323905,"Imeco Soft Face Tissue Box","Imeco","8906200792030","2 x 100 pulls",5406,"Mumbai M12 - Feeder Warehouse",0,0,1,0,1,0,0,0,0,0],[10325051,"Imeco Good Habbit Toilet Tissue - Roll","Imeco","8906200791873","6 x 160 pulls",5397,"Bengaluru B5 - Feeder",368,0,0,0,0,0,0,6,33,95],[10326020,"Imeco Soft Face Tissue Box","Imeco","8906200791903","100 pulls",4842,"Kolkata K6 - Feeder Warehouse",41,0,0,0,0,0,0,10,26,121],[10327642,"Imeco Soft Face Tissue Box","Imeco","8906200792047","3 x 100 pulls",5397,"Bengaluru B5 - Feeder",114,0,0,0,0,0,0,5,9,39],[10330371,"Imeco Good Habbit Compact Napkins","Imeco","8906200792139","2 x 100 pulls",4842,"Kolkata K6 - Feeder Warehouse",0,0,0,0,0,0,0,0,0,0],[10330374,"Imeco Good Habbit Classic Napkins","Imeco","8906200792153","2 x 100 pulls",5397,"Bengaluru B5 - Feeder",57,0,0,0,0,0,0,0,0,1]];
+'use strict';
+/* ---------- utils ---------- */
+const $ = (s, r = document) => r.querySelector(s);
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = n => n == null || isNaN(n) ? '–' : Math.round(n).toLocaleString('en-IN');
+const fmt1 = n => n == null || !isFinite(n) ? '–' : (Math.round(n * 10) / 10).toLocaleString('en-IN');
+const pad = n => String(n).padStart(2, '0');
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const monthOf = d => d.slice(0, 7);
+const monthLabel = m => `${MONTHS[+m.slice(5, 7) - 1]} ${m.slice(0, 4)}`;
+const dateLabel = d => { const [y, m, dd] = d.split('-'); return `${+dd} ${MONTHS[+m - 1].slice(0, 3)} ${y}`; };
+const prevMonth = m => { let y = +m.slice(0, 4), mo = +m.slice(5, 7) - 1; if (mo === 0) { y--; mo = 12; } return `${y}-${pad(mo)}`; };
+const dayNum = d => Math.round(Date.parse(d + 'T00:00:00Z') / 864e5);
+const numFrom = v => { if (v == null || v === '') return null; if (typeof v === 'number') return isFinite(v) ? v : null; const s = String(v).replace(/[,\s₹]/g, ''); if (s === '' || isNaN(+s)) return null; return +s; };
+const norm = h => String(h ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const debounce = (f, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => f(...a), ms); }; };
+let toastT;
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 3800); }
+
+/* ---------- categories ---------- */
+function catOf(name) {
+  const n = String(name).toLowerCase();
+  const rules = [[/wipe/, 'Wet wipes'], [/kitchen (towel|tissue)/, 'Kitchen paper'], [/garbage|trash|bin liner/, 'Garbage bags'],
+    [/toothbrush|tongue clean/, 'Oral care'], [/hair brush|comb/, 'Personal care'], [/tumbler|bottle|sipper|flask|glass/, 'Drinkware'],
+    [/plate|cutlery|disposable|cup/, 'Disposables'], [/tissue|napkin|toilet|pulls/, 'Tissues & toilet rolls']];
+  for (const [re, c] of rules) if (re.test(n)) return c;
+  return 'Other';
+}
+
+/* ---------- persistent storage (IndexedDB, memory fallback) ---------- */
+const Store = {
+  db: null, ok: false, mem: { snaps: new Map(), sales: new Map(), kv: new Map() },
+  async open() {
+    try {
+      this.db = await new Promise((res, rej) => {
+        const r = indexedDB.open('soh-tracker', 1);
+        r.onupgradeneeded = () => { const d = r.result; ['snaps', 'sales'].forEach(s => d.createObjectStore(s, { keyPath: 'id' })); d.createObjectStore('kv'); };
+        r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error('blocked'));
+      });
+      this.ok = true;
+      try { navigator.storage?.persist?.(); } catch (e) { }
+    } catch (e) { this.ok = false; }
+  },
+  tx(store, mode, fn) {
+    return new Promise((res, rej) => {
+      const t = this.db.transaction(store, mode), s = t.objectStore(store); let out;
+      try { out = fn(s); } catch (e) { rej(e); return; }
+      t.oncomplete = () => res(out && out.result !== undefined ? out.result : undefined); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error);
+    });
+  },
+  async all(store) { if (!this.ok) return [...this.mem[store].values()]; return this.tx(store, 'readonly', s => s.getAll()); },
+  draftRoute(store, key) { return S.mode === 'published' && (store === 'snaps' || store === 'sales' || (store === 'kv' && (key === 'skumap' || key === 'settings'))); },
+  async put(store, val, key) { if (this.draftRoute(store, key)) { if (S.admin) saveDraft(); return; } this.mem[store].set(store === 'kv' ? key : val.id, val); if (this.ok) { try { await this.tx(store, 'readwrite', s => store === 'kv' ? s.put(val, key) : s.put(val)); } catch (e) { this.ok = false; toast('Storage write failed. Data will not persist after refresh.'); } } },
+  async del(store, id) { if (this.draftRoute(store)) { if (S.admin) saveDraft(); return; } this.mem[store].delete(id); if (this.ok) await this.tx(store, 'readwrite', s => s.delete(id)); },
+  async clear(store) { if (this.draftRoute(store)) { if (S.admin) saveDraft(); return; } this.mem[store].clear(); if (this.ok) await this.tx(store, 'readwrite', s => s.clear()); },
+  async getKv(key) { if (!this.ok) return this.mem.kv.get(key); return this.tx('kv', 'readonly', s => s.get(key)); }
+};
+
+/* ---------- settings ---------- */
+const DEFAULTS = { windowDays: 7, lead: 3, safe: 2, review: 7, excess: 45, slowMax30: 5, lowUnits: 10, inclInc: true, roundTo: 1, source: 'auto', overrides: {}, includeShut: false };
+const S = { snaps: [], sales: [], settings: { ...DEFAULTS }, ui: { tab: 'dashboard' }, up: { inv: null, sales: null } };
+const saveSettings = debounce(() => Store.put('kv', S.settings, 'settings'), 200);
+
+/* ---------- column mapping ---------- */
+const INV_FIELDS = {
+  id: ['itemid', 'sku', 'skuid', 'skucode', 'productid', 'itemcode', 'articleid', 'materialcode'],
+  nm: ['itemname', 'productname', 'skuname', 'name', 'description', 'itemdescription', 'product', 'item'],
+  br: ['brandname', 'brand'], upc: ['upc', 'barcode', 'ean'], uom: ['uom', 'unitofmeasure', 'packsize', 'pack'],
+  cat: ['category', 'categoryname', 'l1category', 'producttype', 'department'],
+  wid: ['warehousefacilityid', 'warehouseid', 'facilityid', 'locationid'],
+  wn: ['warehousefacilityname', 'warehousename', 'facilityname', 'location', 'warehouse', 'store', 'dc'],
+  sel: ['totalsellable', 'stockonhand', 'soh', 'sellablestock', 'closingstock', 'availablequantity', 'onhand', 'quantity', 'qty', 'stock', 'sellable'],
+  inc: ['incomingscheduledinventory', 'incomingscheduled', 'incoming', 'inbound', 'onorder'],
+  uns: ['totalunsellable', 'unsellable'], dmg: ['damaged'], lost: ['lost'], exp: ['expired'], nex: ['nearexpiry'],
+  s7: ['last7days', 'sold7d', 'units7d', 'sales7d'], s15: ['last15days', 'sold15d', 'units15d', 'sales15d'], s30: ['last30days', 'sold30d', 'units30d', 'sales30d']
+};
+const SALES_FIELDS = {
+  id: INV_FIELDS.id, nm: INV_FIELDS.nm, wn: ['warehousefacilityname', 'warehousename', 'warehouse', 'facilityname', 'location', 'store'],
+  wid: INV_FIELDS.wid, date: ['date', 'saledate', 'orderdate', 'day', 'salesdate', 'businessdate'],
+  units: ['unitssold', 'quantitysold', 'soldqty', 'salesqty', 'unitsold', 'qtysold', 'units', 'sales', 'demand', 'orders', 'quantity', 'qty'],
+  s7: INV_FIELDS.s7, s15: INV_FIELDS.s15, s30: INV_FIELDS.s30
+};
+function mapColumns(headerRow, fields) {
+  const hs = headerRow.map(norm), used = new Set(), map = {};
+  for (const f of Object.keys(fields)) {
+    for (const a of fields[f]) { const i = hs.findIndex((h, j) => h === a && !used.has(j)); if (i >= 0) { map[f] = i; used.add(i); break; } }
+  }
+  return map;
+}
+
+/* ---------- reading files ---------- */
+async function readFileRows(file) {
+  const name = file.name.toLowerCase();
+  let wb;
+  if (name.endsWith('.csv') || name.endsWith('.txt')) wb = XLSX.read(await file.text(), { type: 'string', cellDates: true });
+  else wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+  return wb.SheetNames.map(n => ({ name: n, rows: XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null, blankrows: false }) }));
+}
+function findHeader(sheets, fields, required) {
+  for (const sh of sheets) {
+    for (let i = 0; i < Math.min(sh.rows.length, 20); i++) {
+      const row = sh.rows[i]; if (!row || row.filter(x => x != null).length < 2) continue;
+      const map = mapColumns(row, fields);
+      if (required.every(f => map[f] != null)) return { sheet: sh, hi: i, map, header: row };
+    }
+  }
+  return null;
+}
+function parseDateCell(v) {
+  if (v instanceof Date && !isNaN(v)) { return { d: `${v.getUTCFullYear()}-${pad(v.getUTCMonth() + 1)}-${pad(v.getUTCDate())}`, dm: false }; }
+  if (v == null || v === '') return null;
+  const s = String(v).trim(); let m;
+  if ((m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/))) return ok(+m[1], +m[2], +m[3], false);
+  if ((m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/))) return ok(+m[3], +m[2], +m[1], true);
+  return null;
+  function ok(y, mo, d, dm) { const t = new Date(Date.UTC(y, mo - 1, d)); return t.getUTCMonth() === mo - 1 && t.getUTCDate() === d ? { d: `${y}-${pad(mo)}-${pad(d)}`, dm } : null; }
+}
+function sheetStamp(sheets) { // "This sheet was generated at 2026-11-08 ..."
+  for (const sh of sheets) for (let i = 0; i < Math.min(sh.rows.length, 4); i++) for (const c of sh.rows[i] || []) {
+    if (typeof c === 'string') { const m = c.match(/(\d{4}-\d{2}-\d{2})/); if (m) return m[1]; }
+  }
+  return null;
+}
+
+/* ---------- inventory validation ---------- */
+function parseInventory(sheets, filename) {
+  const found = findHeader(sheets, INV_FIELDS, ['id', 'nm', 'sel']);
+  const res = { kind: 'inv', filename, issues: [], rows: [], stats: {}, map: null, headerOk: !!found };
+  if (!found) {
+    res.fatal = 'Could not find the required columns. The sheet needs an item/SKU ID, a product name and a stock quantity (for example "Item ID", "Item Name", "Total sellable").';
+    return res;
+  }
+  const { sheet, hi, map, header } = found;
+  res.map = Object.entries(map).map(([f, i]) => ({ field: f, header: header[i] })); res.sheetName = sheet.name;
+  res.stamp = sheetStamp(sheets);
+  const hasWh = map.wn != null || map.wid != null, hasSales = ['s7', 's15', 's30'].some(f => map[f] != null);
+  const seen = new Map(); let n = 0, dups = 0, errs = 0, warns = 0, blank = 0;
+  const add = (sev, row, field, msg) => { res.issues.push({ sev, row, field, msg }); sev === 'error' ? errs++ : warns++; };
+  for (let r = hi + 1; r < sheet.rows.length; r++) {
+    const raw = sheet.rows[r]; if (!raw || raw.every(x => x == null || x === '')) { blank++; continue; }
+    const xr = r + 1; n++;
+    const g = f => map[f] != null ? raw[map[f]] : null;
+    const id = String(g('id') ?? '').trim(), nm = String(g('nm') ?? '').trim();
+    let bad = false;
+    if (!id) { add('error', xr, 'Item ID', 'Missing item/SKU ID'); bad = true; }
+    if (!nm) { add('error', xr, 'Product name', 'Missing product name'); bad = true; }
+    let sel = numFrom(g('sel'));
+    if (g('sel') == null || g('sel') === '') { add('error', xr, 'Stock quantity', 'Missing stock quantity'); bad = true; }
+    else if (sel == null) { add('error', xr, 'Stock quantity', `Not a number: "${g('sel')}"`); bad = true; }
+    else if (sel < 0) add('warn', xr, 'Stock quantity', `Negative stock (${sel}). Kept as entered.`);
+    else if (!Number.isInteger(sel)) add('warn', xr, 'Stock quantity', `Fractional quantity (${sel})`);
+    let wn = String(g('wn') ?? '').trim(), wid = g('wid') != null ? String(g('wid')).trim() : '';
+    if (hasWh && !wn && !wid) { add('warn', xr, 'Warehouse', 'Warehouse is blank. Filed under "Unassigned".'); wn = 'Unassigned'; }
+    if (!wn) wn = wid ? 'WH ' + wid : (hasWh ? 'Unassigned' : 'All warehouses');
+    if (!wid) wid = wn;
+    const upc = g('upc') != null ? String(g('upc')).trim() : '';
+    if (/e\+/i.test(upc)) add('warn', xr, 'UPC', `UPC looks like scientific notation (${upc}). Format the column as text.`);
+    const nums = {};
+    for (const f of ['inc', 'uns', 'dmg', 'lost', 'exp', 'nex', 's7', 's15', 's30']) {
+      const raw2 = g(f); const v = numFrom(raw2);
+      if (raw2 != null && raw2 !== '' && v == null && !/^#/.test(String(raw2))) add('warn', xr, f, `Not a number: "${raw2}"`);
+      nums[f] = v;
+    }
+    if (bad) continue;
+    const key = id + '|' + wid;
+    if (seen.has(key)) { dups++; add('error', xr, 'Duplicate', `Duplicate of row ${seen.get(key)} (same item and warehouse). Row skipped.`); continue; }
+    seen.set(key, xr);
+    const catRaw = g('cat') != null ? String(g('cat')).trim() : '';
+    res.rows.push({ id, nm, br: String(g('br') ?? '').trim(), upc, uom: String(g('uom') ?? '').trim(), wid, wn, cat: catRaw || catOf(nm),
+      sel: sel ?? 0, inc: nums.inc ?? 0, uns: nums.uns ?? 0, dmg: nums.dmg ?? 0, lost: nums.lost ?? 0, exp: nums.exp ?? 0, nex: nums.nex ?? 0,
+      s7: hasSales ? nums.s7 : null, s15: hasSales ? nums.s15 : null, s30: hasSales ? nums.s30 : null });
+  }
+  const missingCols = ['br', 'upc', 'wn'].filter(f => map[f] == null).map(f => ({ br: 'Brand', upc: 'UPC', wn: 'Warehouse' }[f]));
+  res.stats = { read: n, valid: res.rows.length, errors: errs, warnings: warns, dups, blank, hasSales, hasWh, catFromFile: map.cat != null, missingCols };
+  if (!hasSales) res.issues.push({ sev: 'warn', row: '-', field: 'Units sold', msg: 'No "Last 7/15/30 days" sales columns. Planning needs a separate sales upload.' });
+  if (n === 0) res.fatal = 'The sheet has a header but no data rows.';
+  return res;
+}
+
+/* ---------- sales validation ---------- */
+function parseSales(sheets, filename) {
+  const res = { kind: 'sales', filename, issues: [], rows: [], stats: {}, headerOk: false };
+  let found = findHeader(sheets, SALES_FIELDS, ['id', 'date', 'units']), fmtKind = 'daily';
+  if (!found) { found = findHeader(sheets, SALES_FIELDS, ['id', 's7']) || findHeader(sheets, SALES_FIELDS, ['id', 's30']) || findHeader(sheets, SALES_FIELDS, ['id', 's15']); fmtKind = 'period'; }
+  if (!found) { res.fatal = 'Could not find sales columns. Provide either daily rows (Item ID, Date, Units sold) or period totals (Item ID, Last 7 days / Last 15 days / Last 30 days).'; return res; }
+  res.headerOk = true; res.fmt = fmtKind;
+  const { sheet, hi, map, header } = found;
+  res.map = Object.entries(map).map(([f, i]) => ({ field: f, header: header[i] }));
+  res.stamp = sheetStamp(sheets);
+  const seen = new Map(); let n = 0, errs = 0, warns = 0, dups = 0, dm = false, minD = null, maxD = null;
+  const add = (sev, row, field, msg) => { res.issues.push({ sev, row, field, msg }); sev === 'error' ? errs++ : warns++; };
+  for (let r = hi + 1; r < sheet.rows.length; r++) {
+    const raw = sheet.rows[r]; if (!raw || raw.every(x => x == null || x === '')) continue;
+    const xr = r + 1; n++; const g = f => map[f] != null ? raw[map[f]] : null;
+    const id = String(g('id') ?? '').trim(); let bad = false;
+    if (!id) { add('error', xr, 'Item ID', 'Missing item/SKU ID'); bad = true; }
+    const wn = String(g('wn') ?? g('wid') ?? '').trim();
+    const o = { id, wh: wn };
+    if (fmtKind === 'daily') {
+      const pd = parseDateCell(g('date'));
+      if (!pd) { add('error', xr, 'Date', g('date') == null ? 'Missing date' : `Unreadable date "${g('date')}". Use YYYY-MM-DD or DD/MM/YYYY.`); bad = true; }
+      else { o.date = pd.d; if (pd.dm) dm = true; if (pd.d > todayStr()) add('warn', xr, 'Date', 'Date is in the future'); }
+      const u = numFrom(g('units'));
+      if (g('units') == null || g('units') === '') { add('error', xr, 'Units sold', 'Missing units sold'); bad = true; }
+      else if (u == null) { add('error', xr, 'Units sold', `Not a number: "${g('units')}"`); bad = true; }
+      else if (u < 0) { add('error', xr, 'Units sold', `Negative units (${u})`); bad = true; } else o.units = u;
+      if (!bad) { const k = `${id}|${wn}|${o.date}`; if (seen.has(k)) { dups++; add('error', xr, 'Duplicate', `Duplicate of row ${seen.get(k)} (same item, warehouse and date). Row skipped.`); continue; } seen.set(k, xr); minD = !minD || o.date < minD ? o.date : minD; maxD = !maxD || o.date > maxD ? o.date : maxD; }
+    } else {
+      let any = false;
+      for (const f of ['s7', 's15', 's30']) { const v = numFrom(g(f)); if (g(f) != null && g(f) !== '' && v == null) { add('error', xr, f, `Not a number: "${g(f)}"`); bad = true; } else if (v != null && v < 0) { add('error', xr, f, 'Negative units'); bad = true; } else { o[f] = v; if (v != null) any = true; } }
+      if (!any && !bad) { add('error', xr, 'Units sold', 'No sales values on this row'); bad = true; }
+      if (!bad) { const k = `${id}|${wn}`; if (seen.has(k)) { dups++; add('error', xr, 'Duplicate', `Duplicate of row ${seen.get(k)}. Row skipped.`); continue; } seen.set(k, xr); }
+    }
+    if (bad) continue;
+    res.rows.push(o);
+  }
+  if (!map.wn && !map.wid) res.issues.push({ sev: 'warn', row: '-', field: 'Warehouse', msg: 'No warehouse column. Sales apply to SKU totals only, so warehouse-level planning falls back to the inventory sheet.' });
+  if (dm) res.issues.push({ sev: 'warn', row: '-', field: 'Date', msg: 'Some dates were written as DD/MM/YYYY and are read day first.' });
+  res.stats = { read: n, valid: res.rows.length, errors: errs, warnings: warns, dups, minD, maxD, hasWh: !!(map.wn || map.wid) };
+  if (n === 0) res.fatal = 'The sheet has a header but no data rows.';
+  return res;
+}
+
+/* ---------- snapshots ---------- */
+const snapsSorted = () => [...S.snaps].sort((a, b) => a.date === b.date ? a.uploadedAt - b.uploadedAt : a.date < b.date ? -1 : 1);
+const dateList = () => [...new Set(S.snaps.map(s => s.date))].sort().reverse();
+const versionsOn = d => S.snaps.filter(s => s.date === d).sort((a, b) => b.uploadedAt - a.uploadedAt);
+const snapForDate = d => versionsOn(d)[0] || null;
+const latestPerDate = () => dateList().map(d => snapForDate(d)).reverse(); // ascending dates
+const snapById = id => S.snaps.find(s => s.id === id) || null;
+function activeSnap() { const u = S.ui; if (u.snapId && snapById(u.snapId)) return snapById(u.snapId); const d = dateList()[0]; return d ? snapForDate(d) : null; }
+function summarize(rows) {
+  const ids = new Set(), whs = new Set(); let sel = 0, uns = 0, oos = 0;
+  for (const r of rows) { ids.add(r.id); whs.add(r.wid); sel += r.sel; uns += r.uns; if (r.sel <= 0) oos++; }
+  return { skus: ids.size, whs: whs.size, lines: rows.length, sel, uns, oos };
+}
+async function saveSnapshot(date, parsed) {
+  const rows = parsed.rows, snap = { id: uid(), date, uploadedAt: Date.now(), filename: parsed.filename, rows, hash: rowsHash(rows), meta: summarize(rows) };
+  S.snaps.push(snap); await Store.put('snaps', snap); return snap;
+}
+
+/* ---------- aggregation ---------- */
+const SUMF = ['sel', 'inc', 'uns', 'dmg', 'lost', 'exp', 'nex'], SOLD = ['s7', 's15', 's30'];
+function aggregate(rows, level) {
+  if (level === 'skuwh') return rows.map(r => ({ ...r, key: r.id + '|' + r.wid }));
+  const m = new Map();
+  for (const r of rows) {
+    const k = level === 'sku' ? r.id : r.wid; let a = m.get(k);
+    if (!a) { a = { key: k, id: level === 'sku' ? r.id : r.wid, nm: level === 'sku' ? r.nm : r.wn, br: r.br, upc: r.upc, uom: r.uom, cat: r.cat, wid: level === 'sku' ? '' : r.wid, wn: level === 'sku' ? '' : r.wn, n: 0, ids: new Set(), whset: new Set() }; SUMF.forEach(f => a[f] = 0); SOLD.forEach(f => a[f] = null); m.set(k, a); }
+    a.n++; a.ids.add(r.id); a.whset.add(r.wid);
+    SUMF.forEach(f => a[f] += r[f] || 0);
+    SOLD.forEach(f => { if (r[f] != null) a[f] = (a[f] || 0) + r[f]; });
+  }
+  return [...m.values()].map(a => { a.nw = a.whset.size; a.ns = a.ids.size; delete a.whset; delete a.ids; return a; });
+}
+
+/* ---------- demand (sales upload first, inventory sheet second) ---------- */
+let salesIdx = null;
+function whKey(s) { return norm(s); }
+function buildSalesIdx() {
+  const st = S.settings, N = st.windowDays; salesIdx = { has: false };
+  if (st.source === 'sheet') return;
+  const daily = new Map(), period = new Map(); let minD = null, maxD = null;
+  for (const up of [...S.sales].sort((a, b) => a.uploadedAt - b.uploadedAt)) {
+    for (const r of up.rows) {
+      if (up.fmt === 'daily') {
+        daily.set(`${r.id}|${whKey(r.wh)}|${r.date}`, r); minD = !minD || r.date < minD ? r.date : minD; maxD = !maxD || r.date > maxD ? r.date : maxD;
+      } else {
+        const v = r['s' + N]; if (v == null) continue;
+        const o = { units: v, days: N };
+        period.set('i:' + r.id + (r.wh ? '|' + whKey(r.wh) : ''), o);
+      }
+    }
+  }
+  const byKey = new Map(), byItem = new Map();
+  if (daily.size) {
+    const end = dayNum(maxD), start = end - N + 1, span = end - dayNum(minD) + 1, days = Math.min(N, span);
+    for (const r of daily.values()) {
+      const dn = dayNum(r.date); if (dn < start) { touch(byItem, r.id, 0, days, span < N); if (r.wh) touch(byKey, r.id + '|' + whKey(r.wh), 0, days, span < N); continue; }
+      touch(byItem, r.id, r.units, days, span < N); if (r.wh) touch(byKey, r.id + '|' + whKey(r.wh), r.units, days, span < N);
+    }
+    salesIdx.dailyEnd = maxD; salesIdx.dailyStart = minD; salesIdx.span = span;
+  }
+  function touch(m, k, u, days, partial) { const o = m.get(k) || { units: 0, days, partial }; o.units += u; m.set(k, o); }
+  // period rows fill keys that have no daily data
+  for (const [k, o] of period) {
+    const [id, w] = k.slice(2).split('|');
+    if (w) { if (!byKey.has(id + '|' + w)) byKey.set(id + '|' + w, o); } else if (!byItem.has(id)) byItem.set(id, o);
+    if (w) { const cur = byItem.get(id); if (!cur || cur.fromPeriodWh) { const c = cur || { units: 0, days: o.days, fromPeriodWh: true }; c.units += o.units; byItem.set(id, c); } }
+  }
+  salesIdx.byKey = byKey; salesIdx.byItem = byItem; salesIdx.has = byKey.size + byItem.size > 0;
+}
+function demandFor(r, level) {
+  const st = S.settings, N = st.windowDays;
+  if (salesIdx && salesIdx.has) {
+    const o = level === 'skuwh' ? (salesIdx.byKey.get(r.id + '|' + whKey(r.wn)) || salesIdx.byKey.get(r.id + '|' + whKey(r.wid))) : level === 'sku' ? salesIdx.byItem.get(r.id) : null;
+    if (o) return { avg: o.units / o.days, units: o.units, src: 'upload', partial: !!o.partial, days: o.days };
+  }
+  if (st.source !== 'upload') {
+    const v = r['s' + N];
+    if (v != null) return { avg: v / N, units: v, src: 'sheet', days: N };
+  }
+  return { avg: null, units: null, src: 'none' };
+}
+
+/* ---------- classification and planning ---------- */
+function ovr(id) { return S.settings.overrides[id] || {}; }
+function enrich(rows, level) {
+  const st = S.settings;
+  return rows.map(r => {
+    const o = { ...r }, d = demandFor(r, level), id = level === 'sku' ? r.id : r.id;
+    const ov = level === 'wh' ? {} : ovr(r.id);
+    o.lead = ov.lead ?? st.lead; o.safe = ov.safe ?? st.safe; o.leadOv = ov.lead != null; o.safeOv = ov.safe != null;
+    o.dem = d.avg; o.demSrc = d.src; o.demPartial = d.partial; o.dUnits = d.units;
+    const sel = r.sel, hasD = d.avg != null;
+    o.days = !hasD ? null : d.avg > 0 ? Math.max(sel, 0) / d.avg : (sel > 0 ? Infinity : 0);
+    const f = []; o.flags = f;
+    if (sel <= 0) f.push('oos');
+    else if (sel <= st.lowUnits || (hasD && d.avg > 0 && o.days < o.lead + o.safe)) f.push('low');
+    if (hasD && sel > 0 && d.avg > 0 && o.days > st.excess) f.push('excess');
+    const s30 = r.s30 != null ? r.s30 : (hasD ? d.avg * 30 : null);
+    o.slow = sel > 0 && s30 != null && s30 <= st.slowMax30; if (o.slow) f.push('slow');
+    o.oosDemand = sel <= 0 && hasD && d.avg > 0;
+    if (!hasD) f.push('nodata');
+    // planning
+    if (hasD && level !== 'wh') {
+      const safeU = Math.ceil(d.avg * o.safe), rop = Math.ceil(d.avg * o.lead + safeU), target = Math.ceil(d.avg * (o.lead + st.review) + safeU);
+      const pos = Math.max(sel, 0) + (st.inclInc ? Math.max(r.inc || 0, 0) : 0);
+      let q = pos <= rop && d.avg > 0 ? target - pos : 0; if (q > 0 && st.roundTo > 1) q = Math.ceil(q / st.roundTo) * st.roundTo;
+      o.safeU = safeU; o.rop = rop; o.target = target; o.pos = pos; o.sugg = Math.max(0, q);
+      if (sel <= 0 && d.avg > 0) o.pstat = 'stockedout';
+      else if (d.avg > 0 && o.days < o.lead) o.pstat = 'risk';
+      else if (o.sugg > 0) o.pstat = 'reorder';
+      else if (f.includes('excess')) o.pstat = 'overstock';
+      else if (d.avg === 0 && sel > 0) o.pstat = 'nosales';
+      else o.pstat = 'ok';
+    } else { o.sugg = null; o.pstat = 'nodata'; }
+    o.attention = f.some(x => x !== 'nodata');
+    return o;
+  });
+}
+const STAT = {
+  oos: ['Out of stock', 'r'], low: ['Low stock', 'y'], excess: ['Excess', 'b'], slow: ['Slow-moving', 'b'], nodata: ['No demand data', ''],
+  stockedout: ['Stocked out', 'r'], risk: ['Stockout risk', 'r'], reorder: ['Reorder', 'y'], overstock: ['Overstock', 'b'], nosales: ['No sales', 'b'], ok: ['Healthy', 'g']
+};
+const chipHtml = k => `<span class="chip ${STAT[k][1]}">${STAT[k][0]}</span>`;
+const daysTxt = d => d == null ? 'No data' : d === Infinity ? '∞' : d >= 999 ? '999+' : fmt1(d);
+
+/* ---------- comparison ---------- */
+function mapFromRows(rows, level) { const m = new Map(); for (const r of aggregate(rows, level)) m.set(r.key, r); return m; }
+function monthMap(month, basis, level) {
+  const snaps = latestPerDate().filter(s => monthOf(s.date) === month); if (!snaps.length) return { map: new Map(), snaps };
+  if (basis === 'closing') return { map: mapFromRows(rowsOf(snaps[snaps.length - 1]), level), snaps, label: `closing ${dateLabel(snaps[snaps.length - 1].date)}` };
+  const acc = new Map();
+  for (const s of snaps) for (const r of aggregate(rowsOf(s), level)) { const a = acc.get(r.key); if (a) a.sel += r.sel; else acc.set(r.key, { ...r }); }
+  for (const a of acc.values()) a.sel = a.sel / snaps.length;
+  return { map: acc, snaps, label: `average of ${snaps.length} snapshot${snaps.length > 1 ? 's' : ''}` };
+}
+function compareMaps(A, B) {
+  const keys = new Set([...A.keys(), ...B.keys()]), out = [];
+  for (const k of keys) {
+    const a = A.get(k), b = B.get(k), qa = a ? a.sel : null, qb = b ? b.sel : null, base = b || a;
+    const delta = (qb ?? 0) - (qa ?? 0);
+    out.push({ key: k, id: base.id, nm: base.nm, wn: base.wn, cat: base.cat, a: qa, b: qb, delta, pct: qa ? delta / Math.abs(qa) * 100 : null, state: qa == null ? 'new' : qb == null ? 'removed' : delta > 0 ? 'up' : delta < 0 ? 'down' : 'same' });
+  }
+  return out;
+}
+
+/* ---------- exports ---------- */
+const csvCell = v => { if (v == null) return ''; const s = String(v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+const toCsv = (head, rows) => '﻿' + [head, ...rows].map(r => r.map(csvCell).join(',')).join('\r\n');
+function toXlsx(sheets) {
+  const wb = XLSX.utils.book_new();
+  for (const [name, aoa] of Object.entries(sheets)) { const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = aoa[0].map((_, i) => ({ wch: Math.min(40, Math.max(10, ...aoa.slice(0, 60).map(r => String(r[i] ?? '').length)) + 2) })); XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31)); }
+  return XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+}
+async function saveFile(filename, data) {
+  let dl = null; try { dl = window.claude?.use ? await window.claude.use('downloads') : null; } catch (e) { }
+  if (dl) {
+    try { await dl.save({ filename, data }); toast('Saved ' + filename); } catch (e) { toast(e && e.code === 'declined' ? 'Download cancelled' : 'Download unavailable: ' + (e && e.code || 'error')); }
+    return;
+  }
+  const blob = data instanceof Blob ? data : new Blob([data]); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+const INV_HEAD = ['Date', 'Item ID', 'Product', 'Brand', 'Category', 'UPC', 'Pack', 'Warehouse ID', 'Warehouse', 'Sellable (SOH)', 'Incoming scheduled', 'Unsellable', 'Damaged', 'Lost', 'Expired', 'Near expiry', 'Sold 7d', 'Sold 15d', 'Sold 30d'];
+const invRow = (date, r) => [date, r.id, r.nm, r.br, r.cat, r.upc, r.uom, r.wid, r.wn, r.sel, r.inc, r.uns, r.dmg, r.lost, r.exp, r.nex, r.s7, r.s15, r.s30];
+function snapSheets(s) { return { 'Stock on hand': [INV_HEAD, ...s.rows.map(r => invRow(s.date, r))] }; }
+function monthSummary(month) {
+  const snaps = latestPerDate().filter(s => monthOf(s.date) === month);
+  const tot = snaps.map(s => metaOf(s).sel), first = snaps[0], last = snaps[snaps.length - 1];
+  return { month, snaps, n: snaps.length, open: first ? metaOf(first).sel : 0, close: last ? metaOf(last).sel : 0, avg: tot.length ? tot.reduce((a, b) => a + b, 0) / tot.length : 0, min: Math.min(...tot), max: Math.max(...tot), last };
+}
+const monthsList = () => [...new Set(S.snaps.map(s => monthOf(s.date)))].sort().reverse();
+
+/* ---------- icons, shell ---------- */
+const ICON = {
+  dashboard: '<path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 8h6V4h-6z"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/>',
+  history: '<path d="M4 5v5h5M4.5 10A8 8 0 1 1 6 16"/><path d="M12 8v5l3 2"/>',
+  compare: '<path d="M7 4L3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/>',
+  warehouses: '<path d="M3 10l9-6 9 6v10H3zM9 20v-6h6v6"/>',
+  planning: '<path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/>',
+  'top-sellers': '<path d="M12 3l2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 16.8 6.6 19.7l1.1-6.1L3.2 9.4l6.1-.8z"/>'
+};
+const TABS = [['dashboard', 'Dashboard'], ['top-sellers', 'Top sellers'], ['warehouses', 'Warehouses'], ['upload', 'Upload'], ['history', 'History'], ['compare', 'Compare'], ['planning', 'Planning']];
+function renderNav() {
+  $('#nav').innerHTML = TABS.map(([k, l]) => `<a href="#${k}" ${S.ui.tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[k]}</svg><span>${l}</span></a>`).join('');
+  $('#railnote').textContent = S.mode === 'published' ? (S.admin ? 'Admin · edits are a draft until you publish.' : 'Read-only · showing published data.') : (Store.ok ? 'Saved in this browser (IndexedDB).' : 'Storage unavailable: data will be lost on refresh.');
+}
+function renderTop() {
+  const s = activeSnap(), t = { dashboard: 'Inventory dashboard', 'top-sellers': 'Top-selling SKUs', warehouses: 'Warehouse status', upload: 'Upload data', history: 'History by month and date', compare: 'Compare stock', planning: 'Replenishment planning' }[S.ui.tab];
+  $('#topband').innerHTML = `<div><h1>${t}</h1><small>${s ? `Stock on hand as of ${dateLabel(s.date)} · uploaded ${new Date(s.uploadedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ${esc(s.filename)}` : 'No inventory uploaded yet'}</small></div>
+  <div class="rowflex">${shutCount() && S.ui.tab !== 'warehouses' ? `<button class="btn sm" data-act="toggle-shut" title="Toggle shutdown warehouses in the numbers">${shutCount()} shutdown · ${S.settings.includeShut ? 'included' : 'excluded'}</button>` : ''}${modeChips()}<a class="btn primary" href="#upload">${canEdit() ? "Upload today's sheet" : 'Admin sign-in'}</a></div>`;
+}
+
+/* ---------- charts ---------- */
+const charts = {};
+function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+function drawChart(id, cfg) {
+  const el = document.getElementById(id); if (!el || !window.Chart) return;
+  if (charts[id]) charts[id].destroy();
+  Chart.defaults.font.family = css('--font-body'); Chart.defaults.color = css('--muted');
+  const grid = css('--grid');
+  cfg.options = Object.assign({ responsive: true, maintainAspectRatio: false, animation: false }, cfg.options || {});
+  cfg.options.scales = cfg.options.scales || { x: { grid: { color: grid }, ticks: { maxRotation: 0, autoSkip: true } }, y: { grid: { color: grid }, beginAtZero: true } };
+  charts[id] = new Chart(el, cfg);
+}
+const chartCard = (title, sub, id, extra = '') => `<div class="card"><header><div><h3>${title}</h3><p>${sub}</p></div>${extra}</header><div class="chartbox"><canvas id="${id}"></canvas></div></div>`;
+
+/* ---------- generic sortable, paged table ---------- */
+function tableHtml(id, cols, rows, st) {
+  const sorted = [...rows];
+  if (st.sort != null) { const c = cols[st.sort], dir = st.dir; sorted.sort((a, b) => { let x = c.v(a), y = c.v(b); if (x == null) x = -Infinity; if (y == null) y = -Infinity; if (typeof x === 'string') return dir * x.localeCompare(y); return dir * (x === y ? 0 : x < y ? -1 : 1); }); }
+  const per = 25, pages = Math.max(1, Math.ceil(sorted.length / per)); st.page = Math.min(st.page || 0, pages - 1);
+  const part = sorted.slice(st.page * per, st.page * per + per);
+  const head = cols.map((c, i) => `<th class="${c.r ? 'r' : ''} ${c.nosort ? 'nosort' : ''}" data-tbl="${id}" data-col="${i}" ${c.nosort ? '' : 'tabindex="0" role="button"'} aria-sort="${st.sort === i ? (st.dir > 0 ? 'ascending' : 'descending') : 'none'}">${c.h}${st.sort === i ? (st.dir > 0 ? ' ▲' : ' ▼') : ''}</th>`).join('');
+  const body = part.length ? part.map(r => `<tr>${cols.map(c => `<td class="${c.r ? 'r' : ''} ${c.wrap ? 'wrap' : ''}">${c.f(r)}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${cols.length}"><div class="empty"><b>No matching rows</b>Adjust the filters above.</div></td></tr>`;
+  return `<div class="tablewrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
+  <div class="pager"><span>${fmt(sorted.length)} rows${sorted.length ? ` · showing ${st.page * per + 1}–${Math.min(sorted.length, st.page * per + per)}` : ''}</span>
+  <span class="rowflex"><button class="btn sm" data-pg="${id}:-1" ${st.page <= 0 ? 'disabled' : ''}>Previous</button><span>Page ${st.page + 1} of ${pages}</span><button class="btn sm" data-pg="${id}:1" ${st.page >= pages - 1 ? 'disabled' : ''}>Next</button></span></div>`;
+}
+const tstate = {};
+const ts = id => tstate[id] || (tstate[id] = { sort: null, dir: 1, page: 0 });
+document.addEventListener('click', e => {
+  const th = e.target.closest('th[data-col]'); if (th && !th.classList.contains('nosort')) { const st = ts(th.dataset.tbl), i = +th.dataset.col; if (st.sort === i) st.dir *= -1; else { st.sort = i; st.dir = 1; } st.page = 0; render(); return; }
+  const pg = e.target.closest('[data-pg]'); if (pg) { const [id, d] = pg.dataset.pg.split(':'); ts(id).page += +d; render(); }
+});
+document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('th[data-col]')) { e.preventDefault(); e.target.click(); } });
+
+/* ---------- DASHBOARD ---------- */
+const DF = () => S.ui.df || (S.ui.df = { q: '', sku: '', cat: '', wh: '', status: '', level: 'skuwh' });
+function dashRows(snap) { const f = DF(); return enrich(aggregate(rowsOf(snap), f.level), f.level); }
+function applyDashFilter(rows) {
+  const f = DF(), q = f.q.toLowerCase(), k = f.sku.toLowerCase();
+  return rows.filter(r => (!q || (r.nm + ' ' + r.br).toLowerCase().includes(q)) && (!k || String(r.id).toLowerCase().includes(k) || String(r.upc).includes(k) || mskuOf(r).toLowerCase().includes(k)) &&
+    (!f.cat || r.cat === f.cat) && (!f.wh || r.wid === f.wh) && (!f.status || (f.status === 'attention' ? r.attention : r.flags.includes(f.status))));
+}
+function viewDashboard() {
+  const snap = activeSnap();
+  if (!snap) return `<div class="card"><div class="empty"><b>No inventory yet</b>Upload your first daily sheet to see stock on hand, alerts and charts.<div style="margin-top:12px"><a class="btn primary" href="#upload">Go to upload</a></div></div></div>`;
+  const f = DF(), all = dashRows(snap), rows = applyDashFilter(all), unit = f.level === 'sku' ? 'SKUs' : 'SKU–warehouse lines';
+  const sum = summarize(rowsOf(snap)), allDates = latestPerDate(), idx = allDates.findIndex(s => s.id === snap.id), prev = idx > 0 ? allDates[idx - 1] : null;
+  const cnt = k => all.filter(r => k === 'attention' ? r.attention : r.flags.includes(k)).length;
+  const delta = prev ? sum.sel - metaOf(prev).sel : null;
+  const oosDem = all.filter(r => r.oosDemand).length;
+  const cats = [...new Set(rowsOf(snap).map(r => r.cat))].sort(), whs = [...new Map(rowsOf(snap).map(r => [r.wid, r.wn]))].sort((a, b) => a[1].localeCompare(b[1]));
+  const dates = dateList(), vers = versionsOn(snap.date);
+  const pills = [['', 'All', all.length], ['attention', 'Needs attention', cnt('attention')], ['oos', 'Out of stock', cnt('oos')], ['low', 'Low stock', cnt('low')], ['excess', 'Excess', cnt('excess')], ['slow', 'Slow-moving', cnt('slow')]];
+  const cols = [
+    { h: 'SKU', v: r => String(r.id), f: r => `<span class="num">${esc(r.id)}</span>` },
+    ...mapCol(),
+    { h: 'Product', v: r => r.nm, wrap: 1, f: r => `<b>${esc(r.nm)}</b><div class="sub">${esc(r.br)}${r.uom ? ' · ' + esc(r.uom) : ''}</div>` },
+    { h: 'Category', v: r => r.cat, f: r => esc(r.cat) },
+    f.level === 'skuwh' ? { h: 'Warehouse', v: r => r.wn, f: r => esc(r.wn) + (isShut(r.wid, snap.date) ? ' <span class="chip r">Shutdown</span>' : '') } : { h: 'Warehouses', r: 1, v: r => r.nw, f: r => r.nw },
+    { h: 'Stock (SOH)', r: 1, v: r => r.sel, f: r => `<b>${fmt(r.sel)}</b>` },
+    { h: 'Incoming', r: 1, v: r => r.inc, f: r => fmt(r.inc) },
+    { h: 'Unsellable', r: 1, v: r => r.uns, f: r => fmt(r.uns) },
+    { h: `Sold ${S.settings.windowDays}d`, r: 1, v: r => r.dUnits, f: r => r.dUnits == null ? '–' : fmt(r.dUnits) },
+    { h: 'Days of stock', r: 1, v: r => r.days == null ? null : r.days === Infinity ? 1e9 : r.days, f: r => daysTxt(r.days) },
+    { h: 'Status', nosort: 1, f: r => `<div class="tags">${r.flags.filter(x => x !== 'nodata').map(chipHtml).join('') || (r.flags.includes('nodata') ? chipHtml('nodata') : chipHtml('ok'))}</div>` }
+  ];
+  return `
+  <div class="card"><div class="filters" style="margin:0">
+    <div class="field"><label for="f-date">Inventory date</label><select id="f-date" data-act="snapdate">${dates.map(d => `<option value="${d}" ${d === snap.date ? 'selected' : ''}>${dateLabel(d)}${d === dates[0] ? ' (latest)' : ''}</option>`).join('')}</select></div>
+    ${vers.length > 1 ? `<div class="field"><label for="f-ver">Upload version</label><select id="f-ver" data-act="snapver">${vers.map((v, i) => `<option value="${v.id}" ${v.id === snap.id ? 'selected' : ''}>${new Date(v.uploadedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}${i === 0 ? ' (newest)' : ''}</option>`).join('')}</select></div>` : ''}
+    <div class="field"><label>View by</label><div class="seg"><button data-act="level" data-v="skuwh" aria-pressed="${f.level === 'skuwh'}">SKU × warehouse</button><button data-act="level" data-v="sku" aria-pressed="${f.level === 'sku'}">SKU total</button></div></div>
+  </div></div>
+  <div class="grid kpis">
+    <div class="kpi"><span class="l">Total SKUs</span><span class="v num">${fmt(sum.skus)}</span><span class="s">${fmt(sum.whs)} warehouses · ${fmt(sum.lines)} lines</span></div>
+    <div class="kpi"><span class="l">Stock on hand (sellable units)</span><span class="v num">${fmt(sum.sel)}</span><span class="s">${delta == null ? 'No earlier snapshot to compare' : `<span class="${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '▲' : '▼'} ${fmt(Math.abs(delta))}</span> vs ${dateLabel(prev.date)}`}</span></div>
+    <button class="kpi crit" data-act="status" data-v="oos"><span class="l">Out of stock (${unit})</span><span class="v num">${fmt(cnt('oos'))}</span><span class="s">${oosDem} with recent sales</span></button>
+    <button class="kpi warn" data-act="status" data-v="low"><span class="l">Low stock (${unit})</span><span class="v num">${fmt(cnt('low'))}</span><span class="s">≤ ${S.settings.lowUnits} units or cover under lead time + safety</span></button>
+    <button class="kpi" data-act="status" data-v="excess"><span class="l">Excess · slow-moving</span><span class="v num">${fmt(cnt('excess'))} · ${fmt(cnt('slow'))}</span><span class="s">over ${S.settings.excess} days cover · ≤ ${S.settings.slowMax30} sold in 30d</span></button>
+    <div class="kpi"><span class="l">Unsellable units</span><span class="v num">${fmt(sum.uns)}</span><span class="s">damaged, lost, expired, near expiry</span></div>
+    ${shutKpi(snap)}
+  </div>
+  <div class="grid cols3">
+    ${chartCard('Stock trend', 'Total sellable units per snapshot date', 'ch-trend')}
+    ${chartCard('Stock by warehouse', 'Top 10 warehouses, sellable units', 'ch-wh')}
+    ${chartCard('Days of stock', `Number of ${unit} by cover`, 'ch-cover')}
+  </div>
+  <div class="card"><header><div><h3>Inventory</h3><p>Search and filter the snapshot. Click a column to sort.</p></div>
+    <div class="rowflex"><button class="btn sm" data-act="exp-view" data-v="csv">CSV</button><button class="btn sm" data-act="exp-view" data-v="xlsx">Excel</button></div></header>
+    <div class="pills" role="group" aria-label="Status filter">${pills.map(([k, l, n]) => `<button class="pill" data-act="status" data-v="${k}" aria-pressed="${f.status === k}">${l} <b>${n}</b></button>`).join('')}</div>
+    <div class="filters">
+      <div class="field"><label for="f-q">Product name or brand</label><input id="f-q" type="search" data-f="q" value="${esc(f.q)}" placeholder="e.g. tissue"></div>
+      <div class="field"><label for="f-sku">SKU / UPC / merchant SKU</label><input id="f-sku" type="search" data-f="sku" value="${esc(f.sku)}" placeholder="e.g. 10248588"></div>
+      <div class="field"><label for="f-cat">Category</label><select id="f-cat" data-f="cat"><option value="">All categories</option>${cats.map(c => `<option ${c === f.cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+      ${f.level === 'skuwh' ? `<div class="field"><label for="f-wh">Warehouse</label><select id="f-wh" data-f="wh"><option value="">All warehouses</option>${whs.map(([i, n]) => `<option value="${esc(i)}" ${String(i) === f.wh ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></div>` : ''}
+    </div>
+    ${tableHtml('dash', cols, rows, ts('dash'))}
+  </div>`;
+}
+function chartsDashboard() {
+  const snap = activeSnap(); if (!snap) return; const f = DF(), all = dashRows(snap);
+  const series = latestPerDate();
+  if (series.length >= 2) drawChart('ch-trend', { type: 'line', data: { labels: series.map(s => dateLabel(s.date).slice(0, -5)), datasets: [{ data: series.map(s => metaOf(s).sel), borderColor: css('--chart1'), backgroundColor: css('--chart1') + '22', fill: true, tension: .25, pointRadius: 3 }] }, options: { plugins: { legend: { display: false } } } });
+  else { const b = $('#ch-trend')?.parentElement; if (b) b.innerHTML = '<div class="empty"><b>Trend appears after two uploads</b>Upload another day to start the line.</div>'; }
+  const wh = new Map(); rowsOf(snap).forEach(r => wh.set(r.wn, (wh.get(r.wn) || 0) + r.sel));
+  const top = [...wh].sort((a, b) => b[1] - a[1]).slice(0, 10);
+  drawChart('ch-wh', { type: 'bar', data: { labels: top.map(x => x[0]), datasets: [{ data: top.map(x => x[1]), backgroundColor: css('--chart1'), borderRadius: 4 }] }, options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { grid: { color: css('--grid') }, beginAtZero: true }, y: { grid: { display: false } } } } });
+  const B = [['Out', r => r.sel <= 0], ['<3d', r => r.days != null && r.days < 3], ['3–7d', r => r.days != null && r.days < 7], ['7–15d', r => r.days != null && r.days < 15], ['15–30d', r => r.days != null && r.days < 30], ['30–60d', r => r.days != null && r.days < 60], ['60d+', r => r.days != null && r.days >= 60], ['No sales', r => r.days === Infinity], ['No data', r => r.days == null]];
+  const cnt = B.map(() => 0);
+  all.forEach(r => { if (r.sel <= 0) { cnt[0]++; return; } if (r.days === Infinity) { cnt[7]++; return; } if (r.days == null) { cnt[8]++; return; } const i = r.days < 3 ? 1 : r.days < 7 ? 2 : r.days < 15 ? 3 : r.days < 30 ? 4 : r.days < 60 ? 5 : 6; cnt[i]++; });
+  const colors = [css('--chart3'), css('--chart3'), css('--chart2'), css('--chart2'), css('--chart1'), css('--chart1'), css('--info'), css('--muted'), css('--muted')];
+  drawChart('ch-cover', { type: 'bar', data: { labels: B.map(b => b[0]), datasets: [{ data: cnt, backgroundColor: colors, borderRadius: 4 }] }, options: { plugins: { legend: { display: false } }, scales: { x: { grid: { color: css('--grid') }, ticks: { autoSkip: false, maxRotation: 0, font: { size: 10 } } }, y: { grid: { color: css('--grid') }, beginAtZero: true } } } });
+}
+
+/* ---------- UPLOAD ---------- */
+function previewHtml(kind) {
+  const u = S.up[kind]; if (!u) return '';
+  if (u.busy) return '<div class="note info">Reading file…</div>';
+  const p = u.parsed; if (!p) return '';
+  const st = p.stats || {}, isInv = kind === 'inv';
+  if (p.fatal) return `<div class="note crit"><span><b>${esc(u.file)}</b>: ${esc(p.fatal)}</span></div><div class="rowflex" style="margin-top:8px"><button class="btn sm" data-act="up-clear" data-k="${kind}">Choose another file</button></div>`;
+  const errs = p.issues.filter(i => i.sev === 'error'), warns = p.issues.filter(i => i.sev === 'warn');
+  let extra = '', blocked = false;
+  if (isInv) {
+    if (!u.date) { extra += '<div class="note crit">Select the inventory date before saving.</div>'; blocked = true; }
+    else {
+      if (u.date > todayStr()) extra += '<div class="note warn">This date is in the future. Check it is correct.</div>';
+      if (p.stamp && p.stamp !== u.date) extra += `<div class="note warn">The sheet says it was generated on ${dateLabel(p.stamp)}, but you selected ${dateLabel(u.date)}.</div>`;
+      const ex = versionsOn(u.date); if (ex.length) extra += `<div class="note info">${ex.length} snapshot${ex.length > 1 ? 's' : ''} already exist for ${dateLabel(u.date)}. This upload is saved as a new version and the earlier ones stay in History.</div>`;
+    }
+  } else if (kind === 'sales') {
+    if (p.fmt === 'period' && !u.date) { extra += '<div class="note crit">Select the "as of" date for these period totals.</div>'; blocked = true; }
+  }
+  if (!st.valid) blocked = true;
+  if (isInv && u.date) { const rv = reviewInv(p, u.date, u); extra += rv.html; if (rv.major && !u.ack) blocked = true; }
+  const lim = 80, shown = p.issues.slice(0, lim);
+  return `<div class="stack">
+    <div class="rowflex"><b>${esc(u.file)}</b><span class="chip">${esc(p.sheetName || '')}</span>${p.fmt ? `<span class="chip b">${p.fmt === 'daily' ? 'Daily sales rows' : 'Period totals'}</span>` : ''}</div>
+    <div class="rowflex"><span class="chip">${fmt(st.read)} rows read</span><span class="chip g">${fmt(st.valid)} valid</span><span class="chip ${st.errors ? 'r' : ''}">${fmt(st.errors)} errors</span><span class="chip ${st.warnings ? 'y' : ''}">${fmt(st.warnings)} warnings</span><span class="chip ${st.dups ? 'r' : ''}">${fmt(st.dups)} duplicates</span></div>
+    ${isInv && st.hasSales === false ? '<div class="note warn">This sheet has no units-sold columns. Planning will need a sales upload.</div>' : ''}
+    ${isInv && !st.catFromFile ? '<div class="note info">No category column found. Categories are inferred from product names.</div>' : ''}
+    ${extra}
+    <details><summary class="sub" style="cursor:pointer">Columns detected</summary><div class="rowflex" style="margin-top:8px">${p.map.map(m => `<span class="chip">${esc(m.field)} ← ${esc(m.header)}</span>`).join('')}</div></details>
+    ${p.issues.length ? `<details ${errs.length ? 'open' : ''}><summary style="cursor:pointer;font-weight:600">Validation details (${p.issues.length})</summary>
+      <div class="tablewrap" style="margin-top:8px;max-height:260px;overflow:auto"><table><thead><tr><th class="nosort">Row</th><th class="nosort">Level</th><th class="nosort">Field</th><th class="nosort">Issue</th></tr></thead><tbody>${shown.map(i => `<tr><td>${i.row}</td><td><span class="chip ${i.sev === 'error' ? 'r' : 'y'}">${i.sev}</span></td><td>${esc(i.field)}</td><td class="wrap">${esc(i.msg)}</td></tr>`).join('')}</tbody></table></div>
+      <div class="rowflex" style="margin-top:8px"><span class="sub">${p.issues.length > lim ? `Showing first ${lim}. ` : ''}</span><button class="btn sm" data-act="issues-csv" data-k="${kind}">Download issue list (CSV)</button></div></details>` : '<div class="note ok">No problems found.</div>'}
+    <div class="rowflex"><button class="btn primary" data-act="up-save" data-k="${kind}" ${blocked ? 'disabled' : ''}>Save ${fmt(st.valid)} valid rows${st.errors ? ` (skip ${fmt(st.errors)} with errors)` : ''}</button><button class="btn" data-act="up-clear" data-k="${kind}">Cancel</button></div>
+  </div>`;
+}
+const dropHtml = (kind, title) => `<label class="drop" id="drop-${kind}" for="file-${kind}"><input id="file-${kind}" data-file="${kind}" type="file" accept=".xlsx,.xls,.csv"><strong>${title}</strong><span>Drop an Excel or CSV file here, or tap to choose</span></label>`;
+function viewUpload() {
+  if (!canEdit()) return lockedHtml();
+  const inv = S.up.inv, sal = S.up.sales, hist = snapsSorted().slice(-6).reverse();
+  return `<div class="grid cols2">
+  <div class="card"><header><div><h3>1 · Daily inventory sheet</h3><p>Each upload is saved as its own snapshot. Earlier days are never overwritten.</p></div></header>
+    <div class="stack">
+      <div class="field" style="max-width:220px"><label for="inv-date">Inventory date</label><input id="inv-date" type="date" data-up-date="inv" value="${esc(inv?.date || todayStr())}" max="${todayStr()}"></div>
+      ${dropHtml('inv', 'Upload inventory (Excel or CSV)')}
+      <div class="sub">Needs an item ID, product name and stock quantity. The Blinkit seller "Stock On Hand" export works as is. <button class="btn sm" data-act="tpl" data-k="inv">Download CSV template</button></div>
+      <div id="pv-inv">${previewHtml('inv')}</div>
+    </div></div>
+  <div class="card"><header><div><h3>2 · Sales and demand data</h3><p>Used for days of stock and replenishment. Optional if your inventory sheet has Last 7/15/30 days columns.</p></div></header>
+    <div class="stack">
+      ${sal?.parsed?.fmt === 'period' ? `<div class="field" style="max-width:220px"><label for="sal-date">Period totals as of</label><input id="sal-date" type="date" data-up-date="sales" value="${esc(sal.date || '')}" max="${todayStr()}"></div>` : ''}
+      ${dropHtml('sales', 'Upload sales or demand (Excel or CSV)')}
+      <div class="sub">Daily rows (Item ID, Date, Units sold, optional Warehouse) or period totals (Last 7 / 15 / 30 days). <button class="btn sm" data-act="tpl" data-k="sales">Download CSV template</button></div>
+      <div id="pv-sales">${previewHtml('sales')}</div>
+      ${S.sales.length ? `<div><b>Saved sales uploads</b><div class="stack" style="margin-top:6px">${S.sales.map(s => `<div class="rowflex"><span class="chip b">${s.fmt === 'daily' ? 'Daily' : 'Period'}</span><span>${esc(s.filename)}</span><span class="sub">${fmt(s.rows.length)} rows${s.fmt === 'daily' ? ` · ${dateLabel(s.minD)} to ${dateLabel(s.maxD)}` : ` · as of ${dateLabel(s.asOf)}`}</span><button class="btn sm danger" data-act="del-sales" data-id="${s.id}">Remove</button></div>`).join('')}</div></div>` : ''}
+    </div></div>
+  </div>
+  ${mapCardHtml()}
+  <div class="grid cols2">
+  <div class="card"><header><div><h3>Recent inventory uploads</h3></div></header>
+    ${hist.length ? `<div class="tablewrap"><table><thead><tr><th class="nosort">Date</th><th class="nosort">File</th><th class="nosort r">Rows</th><th class="nosort r">Stock</th><th class="nosort">Uploaded</th></tr></thead><tbody>${hist.map(s => `<tr><td>${dateLabel(s.date)}</td><td class="wrap">${esc(s.filename)}</td><td class="r">${fmt(s.rows.length)}</td><td class="r">${fmt(s.meta.sel)}</td><td>${new Date(s.uploadedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty"><b>Nothing uploaded</b>Your saved snapshots will be listed here.</div>'}
+  </div>
+  <div class="card"><header><div><h3>Data and backup</h3><p>${Store.ok ? 'Data is stored in this browser and survives refresh. It is not shared with other devices, so keep a backup.' : 'Browser storage is blocked here, so data is kept only until you close this page.'}</p></div></header>
+    <div class="rowflex"><button class="btn" data-act="backup">Download backup (JSON)</button>
+    <label class="btn" for="file-restore" style="cursor:pointer">Restore backup<input id="file-restore" data-file="restore" type="file" accept=".json" style="display:none"></label>
+    <button class="btn danger" id="wipe" data-act="wipe">Erase all data</button></div>
+    <p class="sub">${fmt(S.snaps.length)} inventory snapshots · ${fmt(S.sales.length)} sales uploads</p>
+  </div></div>
+  ${adminCards()}`;
+}
+async function handleFile(kind, file) {
+  if (!file || !canEdit()) return;
+  const prevU = S.up[kind], u = S.up[kind] = { file: file.name, busy: true, touched: !!prevU?.touched, date: prevU?.date || (kind === 'inv' ? todayStr() : '') };
+  render();
+  try {
+    const sheets = await readFileRows(file);
+    const parsed = kind === 'inv' ? parseInventory(sheets, file.name) : kind === 'map' ? parseMapping(sheets, file.name) : parseSales(sheets, file.name);
+    u.busy = false; u.parsed = parsed;
+    if (kind === 'inv' && parsed.stamp && parsed.stamp <= todayStr() && !u.touched) u.date = parsed.stamp;
+    if (kind === 'sales' && parsed.fmt === 'period') u.date = parsed.stamp || todayStr();
+  } catch (e) { u.busy = false; u.parsed = { fatal: 'This file could not be read. Use .xlsx, .xls or .csv. (' + (e.message || e) + ')', issues: [], stats: {} }; }
+  render();
+}
+async function saveUpload(kind) {
+  const u = S.up[kind]; if (!u?.parsed || u.parsed.fatal) return; const p = u.parsed;
+  if (kind === 'inv') {
+    if (!u.date || !canEdit()) return; if (reviewInv(p, u.date, u).major && !u.ack) return; const snap = await saveSnapshot(u.date, p); logAct(`Saved inventory ${u.date}: ${p.rows.length} rows from ${p.filename}`); S.ui.snapId = snap.id; S.up.inv = null;
+    toast(`Saved ${fmt(p.rows.length)} rows for ${dateLabel(u.date)}`); location.hash = '#dashboard';
+  } else if (kind === 'map') {
+    await saveMapping(p); logAct(`Saved SKU mapping: ${p.rows.length} rows from ${p.filename}`); S.up.map = null; toast(`Saved ${fmt(p.rows.length)} SKU mappings`);
+  } else {
+    const rec = { id: uid(), uploadedAt: Date.now(), filename: p.filename, fmt: p.fmt, rows: p.rows, asOf: u.date, minD: p.stats.minD, maxD: p.stats.maxD };
+    S.sales.push(rec); await Store.put('sales', rec); logAct(`Saved sales data: ${p.rows.length} rows from ${p.filename}`); buildSalesIdx(); S.up.sales = null; toast(`Saved ${fmt(p.rows.length)} sales rows`);
+  }
+  render();
+}
+function templateCsv(k) {
+  if (k === 'map') return toCsv(['UPC', 'Merchant SKU', 'Merchant product name'], [['8906200790210', 'MY-SKU-001', 'Bamboo kitchen towel roll']]);
+  return k === 'inv' ? toCsv(['Item ID', 'Item Name', 'Brand Name', 'Category', 'Warehouse Facility ID', 'Warehouse Facility Name', 'Total sellable', 'Incoming scheduled inventory', 'Last 7 days', 'Last 30 days'], [['10248588', 'Sample product', 'Brand', 'Tissues', '1206', 'Lucknow L4', 120, 0, 14, 60]])
+    : toCsv(['Item ID', 'Warehouse Facility Name', 'Date', 'Units sold'], [['10248588', 'Lucknow L4', '2026-11-01', 6], ['10248588', 'Lucknow L4', '2026-11-02', 4]]);
+}
+
+/* ---------- HISTORY ---------- */
+function viewHistory() {
+  const months = monthsList();
+  if (!months.length) return `<div class="card"><div class="empty"><b>No history yet</b>Every inventory upload is kept here, grouped by month and date.</div></div>`;
+  const cur = monthOf(dateList()[0]), pm = prevMonth(cur), ps = monthSummary(pm), cs = monthSummary(cur);
+  let review;
+  if (!ps.n) review = `<div class="note info">No snapshots for ${monthLabel(pm)}. Available months: ${months.map(monthLabel).join(', ')}. Upload that month's sheets to review it while planning ${monthLabel(cur)}.</div>`;
+  else {
+    const rows = aggregate(rowsOf(ps.last), 'sku').sort((a, b) => b.sel - a.sel).slice(0, 8), m = metaOf(ps.last);
+    review = `<div class="grid kpis"><div class="kpi"><span class="l">Closing stock, ${dateLabel(ps.last.date)}</span><span class="v num">${fmt(m.sel)}</span><span class="s">${fmt(m.skus)} SKUs · ${fmt(m.oos)} lines out of stock</span></div>
+      <div class="kpi"><span class="l">Average over ${ps.n} snapshot${ps.n > 1 ? 's' : ''}</span><span class="v num">${fmt(ps.avg)}</span><span class="s">low ${fmt(ps.min)} · high ${fmt(ps.max)}</span></div>
+      <div class="kpi"><span class="l">Now vs last month's close</span><span class="v num ${cs.close - ps.close >= 0 ? 'up' : 'down'}">${cs.close - ps.close >= 0 ? '+' : '−'}${fmt(Math.abs(cs.close - ps.close))}</span><span class="s">${monthLabel(cur)} latest: ${fmt(cs.close)}</span></div></div>
+      <div class="rowflex"><span class="sub">Largest closing positions:</span>${rows.map(r => `<span class="chip">${esc(r.nm.slice(0, 28))} · ${fmt(r.sel)}</span>`).join('')}</div>
+      <div class="rowflex"><button class="btn sm" data-act="open-snap" data-id="${ps.last.id}">Open closing snapshot</button><button class="btn sm" data-act="cmp-months" data-a="${pm}" data-b="${cur}">Compare months</button><button class="btn sm" data-act="exp-month" data-m="${pm}">Download ${monthLabel(pm)} report</button></div>`;
+  }
+  const all = latestPerDate();
+  return `<div class="card"><header><div><h3>Last month's warehouse stock</h3><p>${monthLabel(pm)} closing position, for planning ${monthLabel(cur)}</p></div></header><div class="stack">${review}</div></div>
+  ${chartCard('Total stock by date', 'Sellable units in each saved snapshot', 'ch-hist')}
+  <div class="card"><header><div><h3>Months and dates</h3><p>Newest first. Expand a month to open, download or delete a day.</p></div>
+    <div class="rowflex"><button class="btn sm" data-act="exp-all" data-v="xlsx">All history (Excel)</button><button class="btn sm" data-act="exp-all" data-v="csv">All history (CSV)</button></div></header>
+  <div class="stack">${months.map((m, i) => {
+    const s = monthSummary(m), allS = S.snaps.filter(x => monthOf(x.date) === m).sort((a, b) => b.date.localeCompare(a.date) || b.uploadedAt - a.uploadedAt);
+    return `<details class="month" ${i === 0 ? 'open' : ''}><summary><span>${monthLabel(m)}</span><span class="rowflex"><span class="chip">${s.n} day${s.n > 1 ? 's' : ''}</span><span class="chip g">Close ${fmt(s.close)}</span><span class="chip">Avg ${fmt(s.avg)}</span></span></summary>
+      <div class="inner"><div class="rowflex"><button class="btn sm" data-act="exp-month" data-m="${m}">Month report (Excel)</button></div>
+      <div class="tablewrap"><table><thead><tr><th class="nosort">Date</th><th class="nosort">File</th><th class="nosort r">SKUs</th><th class="nosort r">Stock</th><th class="nosort r">Out of stock</th><th class="nosort">Uploaded</th><th class="nosort">Actions</th></tr></thead><tbody>
+      ${allS.map(x => `<tr><td><b>${dateLabel(x.date)}</b>${versionsOn(x.date)[0].id !== x.id ? ' <span class="chip y">older version</span>' : ''}</td><td class="wrap">${esc(x.filename)}</td><td class="r">${fmt(metaOf(x).skus)}</td><td class="r">${fmt(metaOf(x).sel)}</td><td class="r">${fmt(metaOf(x).oos)}</td><td>${new Date(x.uploadedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+      <td><div class="rowflex"><button class="btn sm" data-act="open-snap" data-id="${x.id}">Open</button><button class="btn sm" data-act="exp-snap" data-id="${x.id}" data-v="csv">CSV</button><button class="btn sm" data-act="exp-snap" data-id="${x.id}" data-v="xlsx">Excel</button>${canEdit() ? `<button class="btn sm danger" data-act="del-snap" data-id="${x.id}">Delete</button>` : ''}</div></td></tr>`).join('')}
+      </tbody></table></div></div></details>`;
+  }).join('')}</div></div>`;
+}
+function chartsHistory() {
+  const all = latestPerDate(); if (!all.length || !$('#ch-hist')) return;
+  drawChart('ch-hist', { type: 'bar', data: { labels: all.map(s => dateLabel(s.date).slice(0, -5)), datasets: [{ data: all.map(s => metaOf(s).sel), backgroundColor: css('--chart1'), borderRadius: 4 }] }, options: { plugins: { legend: { display: false } } } });
+}
+
+/* ---------- COMPARE ---------- */
+const CF = () => S.ui.cf || (S.ui.cf = { mode: 'date', level: 'sku', basis: 'closing', a: null, b: null, ma: null, mb: null, q: '', show: 'changed' });
+function compareData() {
+  const f = CF(), dates = latestPerDate();
+  if (f.mode === 'date') {
+    if (dates.length < 2) return { need: 'Upload at least two inventory days to compare dates.' };
+    const b = snapById(f.b) || dates[dates.length - 1], a = snapById(f.a) || dates[dates.length - 2];
+    return { rows: compareMaps(mapFromRows(rowsOf(a), f.level), mapFromRows(rowsOf(b), f.level)), la: dateLabel(a.date), lb: dateLabel(b.date), a, b };
+  }
+  const months = monthsList().slice().reverse();
+  if (months.length < 2) return { need: 'Upload inventory from at least two different months to compare months.' };
+  const mb = f.mb && months.includes(f.mb) ? f.mb : months[months.length - 1], ma = f.ma && months.includes(f.ma) ? f.ma : months[months.length - 2];
+  const A = monthMap(ma, f.basis, f.level), B = monthMap(mb, f.basis, f.level);
+  return { rows: compareMaps(A.map, B.map), la: `${monthLabel(ma)} (${A.label})`, lb: `${monthLabel(mb)} (${B.label})`, ma, mb, months };
+}
+function viewCompare() {
+  const f = CF(), d = compareData(), dates = latestPerDate().slice().reverse(), months = monthsList().slice().reverse();
+  const modeSeg = `<div class="seg"><button data-act="cmode" data-v="date" aria-pressed="${f.mode === 'date'}">Date to date</button><button data-act="cmode" data-v="month" aria-pressed="${f.mode === 'month'}">Month to month</button></div>`;
+  const lvl = `<div class="seg"><button data-act="clevel" data-v="sku" aria-pressed="${f.level === 'sku'}">SKU</button><button data-act="clevel" data-v="wh" aria-pressed="${f.level === 'wh'}">Warehouse</button><button data-act="clevel" data-v="skuwh" aria-pressed="${f.level === 'skuwh'}">SKU × warehouse</button></div>`;
+  let sel = '';
+  if (f.mode === 'date' && dates.length >= 2) sel = `<div class="field"><label for="c-a">From (earlier)</label><select id="c-a" data-c="a">${dates.map(s => `<option value="${s.id}" ${d.a?.id === s.id ? 'selected' : ''}>${dateLabel(s.date)}</option>`).join('')}</select></div><div class="field"><label for="c-b">To (later)</label><select id="c-b" data-c="b">${dates.map(s => `<option value="${s.id}" ${d.b?.id === s.id ? 'selected' : ''}>${dateLabel(s.date)}</option>`).join('')}</select></div>`;
+  if (f.mode === 'month' && months.length >= 2) sel = `<div class="field"><label for="c-ma">From month</label><select id="c-ma" data-c="ma">${months.map(m => `<option value="${m}" ${d.ma === m ? 'selected' : ''}>${monthLabel(m)}</option>`).join('')}</select></div><div class="field"><label for="c-mb">To month</label><select id="c-mb" data-c="mb">${months.map(m => `<option value="${m}" ${d.mb === m ? 'selected' : ''}>${monthLabel(m)}</option>`).join('')}</select></div>
+    <div class="field"><label>Monthly figure</label><div class="seg"><button data-act="cbasis" data-v="closing" aria-pressed="${f.basis === 'closing'}">Closing</button><button data-act="cbasis" data-v="average" aria-pressed="${f.basis === 'average'}">Average</button></div></div>`;
+  const head = `<div class="card"><div class="filters" style="margin:0;align-items:end"><div class="field"><label>Compare</label>${modeSeg}</div>${sel}<div class="field"><label>Group by</label>${lvl}</div></div></div>`;
+  if (d.need) return head + `<div class="card"><div class="empty"><b>Not enough history</b>${d.need}</div></div>`;
+  let rows = d.rows; const ta = rows.reduce((s, r) => s + (r.a || 0), 0), tb = rows.reduce((s, r) => s + (r.b || 0), 0);
+  const c = k => rows.filter(r => r.state === k).length;
+  const q = f.q.toLowerCase(); let vis = rows.filter(r => (!q || (r.nm + ' ' + r.id).toLowerCase().includes(q)) && (f.show === 'all' || r.delta !== 0));
+  if (f.show === 'up') vis = vis.filter(r => r.delta > 0); if (f.show === 'down') vis = vis.filter(r => r.delta < 0);
+  const lab = f.level === 'wh' ? 'Warehouse' : 'SKU';
+  const cols = [{ h: f.level === 'wh' ? 'Warehouse ID' : 'SKU', v: r => String(r.id), f: r => esc(r.id) }, { h: f.level === 'wh' ? 'Warehouse' : 'Product', v: r => r.nm, wrap: 1, f: r => `<b>${esc(r.nm)}</b>` }].concat(f.level === 'skuwh' ? [{ h: 'Warehouse', v: r => r.wn, f: r => esc(r.wn) }] : [],
+    [{ h: esc(d.la), r: 1, v: r => r.a, f: r => r.a == null ? '–' : fmt(r.a) }, { h: esc(d.lb), r: 1, v: r => r.b, f: r => r.b == null ? '–' : fmt(r.b) }, { h: 'Change', r: 1, v: r => r.delta, f: r => `<b class="${r.delta > 0 ? 'up' : r.delta < 0 ? 'down' : ''}">${r.delta > 0 ? '+' : r.delta < 0 ? '−' : ''}${fmt(Math.abs(r.delta))}</b>` },
+      { h: '%', r: 1, v: r => r.pct, f: r => r.pct == null ? '–' : fmt1(r.pct) + '%' }, { h: 'State', v: r => r.state, f: r => ({ new: '<span class="chip b">New</span>', removed: '<span class="chip y">Removed</span>', up: '<span class="chip g">Up</span>', down: '<span class="chip r">Down</span>', same: '<span class="chip">No change</span>' })[r.state] }]);
+  const net = tb - ta;
+  return head + `<div class="grid kpis"><div class="kpi"><span class="l">${esc(d.la)}</span><span class="v num">${fmt(ta)}</span><span class="s">sellable units</span></div><div class="kpi"><span class="l">${esc(d.lb)}</span><span class="v num">${fmt(tb)}</span><span class="s">sellable units</span></div>
+    <div class="kpi"><span class="l">Net change</span><span class="v num ${net >= 0 ? 'up' : 'down'}">${net >= 0 ? '+' : '−'}${fmt(Math.abs(net))}</span><span class="s">${ta ? fmt1(net / ta * 100) + '%' : '–'}</span></div>
+    <div class="kpi"><span class="l">Increased · decreased</span><span class="v num">${c('up')} · ${c('down')}</span><span class="s">${c('same')} unchanged</span></div><div class="kpi"><span class="l">New · removed</span><span class="v num">${c('new')} · ${c('removed')}</span><span class="s">appear in one period only</span></div></div>
+  ${chartCard('Biggest movers', 'Largest increases and decreases in units', 'ch-mov')}
+  <div class="card"><header><div><h3>Change by ${f.level === 'wh' ? 'warehouse' : f.level === 'sku' ? 'SKU' : 'SKU and warehouse'}</h3></div><div class="rowflex"><button class="btn sm" data-act="exp-cmp" data-v="csv">CSV</button><button class="btn sm" data-act="exp-cmp" data-v="xlsx">Excel</button></div></header>
+  <div class="filters"><div class="field"><label for="c-q">Search</label><input id="c-q" type="search" data-c="q" value="${esc(f.q)}" placeholder="Name or ID"></div><div class="field"><label>Show</label><div class="seg">${[['changed', 'Changed'], ['up', 'Increased'], ['down', 'Decreased'], ['all', 'All']].map(([k, l]) => `<button data-act="cshow" data-v="${k}" aria-pressed="${f.show === k}">${l}</button>`).join('')}</div></div></div>
+  ${tableHtml('cmp', cols, vis, ts('cmp'))}</div>`;
+}
+function chartsCompare() {
+  const d = compareData(); if (!d.rows || !$('#ch-mov')) return;
+  const ch = d.rows.filter(r => r.delta !== 0).sort((a, b) => b.delta - a.delta), top = [...ch.slice(0, 6), ...ch.slice(-6).filter(r => r.delta < 0)].filter((r, i, a) => a.indexOf(r) === i);
+  drawChart('ch-mov', { type: 'bar', data: { labels: top.map(r => (r.nm || r.id).slice(0, 26) + (CF().level === 'skuwh' ? ' · ' + (r.wn || '').slice(0, 12) : '')), datasets: [{ data: top.map(r => r.delta), backgroundColor: top.map(r => r.delta >= 0 ? css('--chart1') : css('--chart3')), borderRadius: 4 }] }, options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { grid: { color: css('--grid') } }, y: { grid: { display: false } } } } });
+}
+
+/* ---------- PLANNING ---------- */
+const PF = () => S.ui.pf || (S.ui.pf = { level: 'skuwh', q: '', status: '', wh: '' });
+function viewPlanning() {
+  const snap = activeSnap(), st = S.settings, f = PF();
+  if (!snap) return `<div class="card"><div class="empty"><b>No inventory yet</b>Upload an inventory sheet first, then planning uses it with your sales data.</div></div>`;
+  const rows0 = enrich(aggregate(rowsOf(snap), f.level), f.level), nodata = rows0.filter(r => r.pstat === 'nodata').length, sheetSrc = rows0.filter(r => r.demSrc === 'sheet').length, upSrc = rows0.filter(r => r.demSrc === 'upload').length, partial = rows0.filter(r => r.demPartial).length;
+  const q = f.q.toLowerCase(); const rows = rows0.filter(r => (!q || (r.nm + ' ' + r.id).toLowerCase().includes(q)) && (!f.status || r.pstat === f.status) && (!f.wh || r.wid === f.wh));
+  const count = k => rows0.filter(r => r.pstat === k).length, totalSugg = rows0.reduce((s, r) => s + (r.sugg || 0), 0);
+  const whs = [...new Map(rowsOf(snap).map(r => [r.wid, r.wn]))].sort((a, b) => a[1].localeCompare(b[1]));
+  const stale = salesIdx?.dailyEnd && dayNum(snap.date) - dayNum(salesIdx.dailyEnd) > 14;
+  const inp = (k, l, min, step = 1) => `<div class="field"><label for="s-${k}">${l}</label><input id="s-${k}" type="number" min="${min}" step="${step}" data-set="${k}" value="${st[k]}"></div>`;
+  const cols = [{ h: 'SKU', v: r => String(r.id), f: r => esc(r.id) }, ...mapCol(), { h: 'Product', v: r => r.nm, wrap: 1, f: r => `<b>${esc(r.nm)}</b>` }].concat(f.level === 'skuwh' ? [{ h: 'Warehouse', v: r => r.wn, f: r => esc(r.wn) }] : [],
+    [{ h: 'Stock', r: 1, v: r => r.sel, f: r => fmt(r.sel) }, { h: 'Incoming', r: 1, v: r => r.inc, f: r => fmt(r.inc) }, { h: 'Avg daily sales', r: 1, v: r => r.dem, f: r => r.dem == null ? '<span class="chip">No data</span>' : fmt1(r.dem) + (r.demPartial ? ' <span class="chip y" title="Less data than the window">partial</span>' : '') },
+      { h: 'Days of stock', r: 1, v: r => r.days == null ? null : r.days === Infinity ? 1e9 : r.days, f: r => daysTxt(r.days) },
+      { h: 'Lead (d)', nosort: 1, f: r => `<input class="num" style="width:56px;padding:3px 6px;border:1px solid var(--line);border-radius:8px;background:var(--surface)" type="number" min="0" aria-label="Lead time days for ${esc(r.id)}" data-ov="lead" data-id="${esc(r.id)}" value="${r.lead}">` },
+      { h: 'Safety (d)', nosort: 1, f: r => `<input class="num" style="width:56px;padding:3px 6px;border:1px solid var(--line);border-radius:8px;background:var(--surface)" type="number" min="0" aria-label="Safety days for ${esc(r.id)}" data-ov="safe" data-id="${esc(r.id)}" value="${r.safe}">` },
+      { h: 'Reorder point', r: 1, v: r => r.rop, f: r => r.rop == null ? '–' : fmt(r.rop) }, { h: 'Target stock', r: 1, v: r => r.target, f: r => r.target == null ? '–' : fmt(r.target) },
+      { h: 'Suggested order', r: 1, v: r => r.sugg, f: r => r.sugg == null ? '–' : r.sugg > 0 ? `<b>${fmt(r.sugg)}</b>` : '0' }, { h: 'Status', v: r => r.pstat, f: r => chipHtml(r.pstat) }]);
+  return `
+  <div class="grid kpis">
+    <button class="kpi crit" data-act="pstat" data-v="risk"><span class="l">Stockout risk</span><span class="v num">${count('risk') + count('stockedout')}</span><span class="s">${count('stockedout')} already stocked out</span></button>
+    <button class="kpi warn" data-act="pstat" data-v="reorder"><span class="l">Reorder now</span><span class="v num">${count('reorder')}</span><span class="s">at or below reorder point</span></button>
+    <button class="kpi" data-act="pstat" data-v="overstock"><span class="l">Overstock</span><span class="v num">${count('overstock')}</span><span class="s">over ${st.excess} days of cover</span></button>
+    <div class="kpi"><span class="l">Suggested units to order</span><span class="v num">${fmt(totalSugg)}</span><span class="s">across ${rows0.filter(r => r.sugg > 0).length} lines</span></div>
+    <button class="kpi" data-act="pstat" data-v="nodata"><span class="l">Missing demand data</span><span class="v num">${nodata}</span><span class="s">no forecast generated</span></button>
+  </div>
+  ${nodata ? `<div class="note warn"><span><b>${nodata} line${nodata > 1 ? 's have' : ' has'} no sales data.</b> Those rows show "No data" and get no suggested order. Upload sales or demand data, or an inventory sheet with Last 7/15/30 days columns.</span></div>` : ''}
+  ${stale ? `<div class="note warn"><span>Your latest daily sales row is ${dateLabel(salesIdx.dailyEnd)}, more than 14 days before this snapshot. Recommendations may be out of date.</span></div>` : ''}
+  <div class="card"><header><div><h3>Planning assumptions</h3><p>Change these and every recommendation updates. Per-SKU lead time and safety days can be edited in the table.</p></div><button class="btn sm" data-act="reset-set">Reset defaults</button></header>
+    <div class="formgrid">
+      <div class="field"><label for="s-windowDays">Sales window</label><select id="s-windowDays" data-set="windowDays">${[7, 15, 30].map(n => `<option value="${n}" ${st.windowDays === n ? 'selected' : ''}>Last ${n} days</option>`).join('')}</select></div>
+      ${inp('lead', 'Lead time (days)', 0)}${inp('safe', 'Safety stock (days of sales)', 0)}${inp('review', 'Days to cover after arrival', 0)}${inp('excess', 'Overstock above (days of cover)', 1)}${inp('lowUnits', 'Low stock at or below (units)', 0)}${inp('slowMax30', 'Slow-moving: sold in 30d at most', 0)}${inp('roundTo', 'Round orders up to multiple of', 1)}
+      <div class="field"><label for="s-source">Demand source</label><select id="s-source" data-set="source"><option value="auto" ${st.source === 'auto' ? 'selected' : ''}>Uploaded sales, then inventory sheet</option><option value="upload" ${st.source === 'upload' ? 'selected' : ''}>Uploaded sales only</option><option value="sheet" ${st.source === 'sheet' ? 'selected' : ''}>Inventory sheet only</option></select></div>
+      <div class="field"><label for="s-inclInc">Incoming stock</label><select id="s-inclInc" data-set="inclInc"><option value="1" ${st.inclInc ? 'selected' : ''}>Count scheduled incoming</option><option value="0" ${!st.inclInc ? 'selected' : ''}>Ignore incoming</option></select></div>
+    </div>
+    <div class="assump" style="margin-top:12px">
+      <div><b>Average daily sales</b>Units sold in the last ${st.windowDays} days ÷ ${st.windowDays}. Uploaded daily sales are averaged over the days actually present when fewer than ${st.windowDays}.</div>
+      <div><b>Days of stock</b>Sellable stock ÷ average daily sales. Risk when below lead time (${st.lead}d), low below lead + safety (${st.lead + st.safe}d).</div>
+      <div><b>Reorder point · target</b>Reorder point = daily sales × lead + safety. Target = daily sales × (lead + ${st.review}) + safety.</div>
+      <div><b>Suggested order</b>Target − (stock${st.inclInc ? ' + incoming' : ''}) when position is at or below the reorder point, rounded up to ${st.roundTo}. Otherwise 0.</div>
+      <div><b>Demand used for this snapshot</b>${upSrc} lines from uploaded sales, ${sheetSrc} from the inventory sheet, ${nodata} with none${partial ? `, ${partial} on a partial window` : ''}.</div>
+      <div><b>Not modelled</b>No seasonality, promotions or trend. Sales are treated as flat at the recent average.</div>
+    </div></div>
+  <div class="card"><header><div><h3>Replenishment plan</h3><p>Snapshot of ${dateLabel(snap.date)}</p></div><div class="rowflex"><button class="btn sm" data-act="exp-plan" data-v="csv">CSV</button><button class="btn sm" data-act="exp-plan" data-v="xlsx">Excel</button></div></header>
+    <div class="filters"><div class="field"><label for="p-q">Search</label><input id="p-q" type="search" data-p="q" value="${esc(f.q)}" placeholder="Name or SKU"></div>
+      <div class="field"><label for="p-st">Status</label><select id="p-st" data-p="status"><option value="">All</option>${['stockedout', 'risk', 'reorder', 'overstock', 'nosales', 'ok', 'nodata'].map(k => `<option value="${k}" ${f.status === k ? 'selected' : ''}>${STAT[k][0]}</option>`).join('')}</select></div>
+      ${f.level === 'skuwh' ? `<div class="field"><label for="p-wh">Warehouse</label><select id="p-wh" data-p="wh"><option value="">All</option>${whs.map(([i, n]) => `<option value="${esc(i)}" ${String(i) === f.wh ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></div>` : ''}
+      <div class="field"><label>Plan by</label><div class="seg"><button data-act="plevel" data-v="skuwh" aria-pressed="${f.level === 'skuwh'}">SKU × warehouse</button><button data-act="plevel" data-v="sku" aria-pressed="${f.level === 'sku'}">SKU total</button></div></div></div>
+    ${tableHtml('plan', cols, rows, ts('plan'))}</div>`;
+}
+
+/* ---------- SKU mapping (UPC -> merchant SKU) ---------- */
+const normUpc = v => String(v ?? '').replace(/\D/g, '').replace(/^0+/, '');
+let mapIdx = { byUpc: new Map(), byId: new Map() };
+function buildMapIdx() {
+  mapIdx = { byUpc: new Map(), byId: new Map() };
+  for (const r of (S.map?.rows || [])) { if (r.nu) mapIdx.byUpc.set(r.nu, r); if (r.id) mapIdx.byId.set(String(r.id), r); }
+}
+const mapEntry = r => mapIdx.byUpc.get(normUpc(r.upc)) || mapIdx.byId.get(String(r.id)) || null;
+const mskuOf = r => mapEntry(r)?.sku || '';
+const hasMap = () => !!(S.map && S.map.rows.length);
+function mapCol() {
+  return hasMap() ? [{ h: 'Merchant SKU', v: r => mskuOf(r), f: r => mskuOf(r) ? `<span class="num">${esc(mskuOf(r))}</span>` : '<span class="chip y">Unmapped</span>' }] : [];
+}
+const MAP_FIELDS = {
+  upc: ['upc', 'barcode', 'ean', 'gtin', 'upccode', 'eancode'],
+  sku: ['merchantsku', 'sellersku', 'vendorsku', 'merchantskucode', 'skucode', 'sku', 'partnerskuid', 'skuid', 'merchantcode', 'articlecode', 'materialcode', 'itemcode'],
+  nm: ['merchantproductname', 'merchantskuname', 'productname', 'skuname', 'itemname', 'name', 'description'],
+  id: ['blinkititemid', 'itemid', 'blinkitid']
+};
+function parseMapping(sheets, filename) {
+  const res = { kind: 'map', filename, issues: [], rows: [], stats: {} };
+  const found = findHeader(sheets, MAP_FIELDS, ['upc', 'sku']) || findHeader(sheets, MAP_FIELDS, ['id', 'sku']);
+  if (!found) { res.fatal = 'Could not find the mapping columns. The file needs a UPC (or Item ID) column and a merchant SKU column, for example "UPC" and "Merchant SKU".'; return res; }
+  const { sheet, hi, map, header } = found; res.map = Object.entries(map).map(([f, i]) => ({ field: f, header: header[i] })); res.sheetName = sheet.name;
+  let n = 0, errs = 0, warns = 0, dups = 0; const byKey = new Map(), skuUpcs = new Map();
+  const add = (sev, row, field, msg) => { res.issues.push({ sev, row, field, msg }); sev === 'error' ? errs++ : warns++; };
+  for (let r = hi + 1; r < sheet.rows.length; r++) {
+    const raw = sheet.rows[r]; if (!raw || raw.every(x => x == null || x === '')) continue;
+    const xr = r + 1; n++; const g = f => map[f] != null ? raw[map[f]] : null;
+    const upcRaw = g('upc') != null ? String(g('upc')).trim() : '', sku = String(g('sku') ?? '').trim(), id = g('id') != null ? String(g('id')).trim() : '';
+    let bad = false;
+    if (!sku) { add('error', xr, 'Merchant SKU', 'Missing merchant SKU'); bad = true; }
+    if (map.upc != null) {
+      if (!upcRaw && !id) { add('error', xr, 'UPC', 'Missing UPC'); bad = true; }
+      else if (upcRaw) {
+        if (/e\+/i.test(upcRaw)) { add('error', xr, 'UPC', `UPC is in scientific notation (${upcRaw}). Format the column as text and re-save.`); bad = true; }
+        else { const d = normUpc(upcRaw); if (!/^\d+$/.test(upcRaw.replace(/[\s-]/g, ''))) { add('error', xr, 'UPC', `UPC has non-numeric characters: "${upcRaw}"`); bad = true; } else if (d.length < 8 || d.length > 14) add('warn', xr, 'UPC', `UPC length ${d.length} is unusual (expected 8 to 14 digits)`); }
+      }
+    }
+    if (bad) continue;
+    const nu = normUpc(upcRaw), key = nu || 'id:' + id;
+    if (byKey.has(key)) {
+      const prev = byKey.get(key);
+      if (prev.sku === sku) { dups++; add('error', xr, 'Duplicate', `Duplicate of row ${prev.row} (same UPC and SKU). Row skipped.`); }
+      else add('error', xr, 'Conflict', `UPC already mapped to "${prev.sku}" on row ${prev.row}. This row is skipped.`);
+      continue;
+    }
+    byKey.set(key, { sku, row: xr });
+    const set = skuUpcs.get(sku) || []; set.push(xr); skuUpcs.set(sku, set);
+    res.rows.push({ upc: upcRaw, nu, sku, nm: String(g('nm') ?? '').trim(), id });
+  }
+  for (const [sku, rs] of skuUpcs) if (rs.length > 1) add('warn', rs[1], 'Merchant SKU', `"${sku}" maps to ${rs.length} UPCs (rows ${rs.slice(0, 4).join(', ')}). Allowed, but check these are pack variants.`);
+  res.stats = { read: n, valid: res.rows.length, errors: errs, warnings: warns, dups };
+  if (n === 0) res.fatal = 'The sheet has a header but no data rows.';
+  return res;
+}
+async function saveMapping(p) {
+  const cur = new Map((S.map?.rows || []).map(r => [r.nu || 'id:' + r.id, r]));
+  p.rows.forEach(r => cur.set(r.nu || 'id:' + r.id, r));
+  S.map = { rows: [...cur.values()], filename: p.filename, uploadedAt: Date.now() };
+  await Store.put('kv', S.map, 'skumap'); buildMapIdx();
+}
+function mapCardHtml() {
+  const snap = activeSnap(), m = S.map, u = S.up.map;
+  const items = snap ? [...new Map(snap.rows.map(r => [r.id, r])).values()] : [], un = items.filter(r => !mskuOf(r));
+  return `<div class="card"><header><div><h3>3 · SKU mapping (UPC → merchant SKU)</h3><p>Matches each Blinkit item to your own SKU code by UPC. Applied to every snapshot, old and new.</p></div></header>
+  <div class="grid cols2"><div class="stack">
+    ${dropHtml('map', 'Upload SKU mapping (Excel or CSV)')}
+    <div class="sub">Columns: UPC and Merchant SKU (optional: product name, Item ID). A new upload adds to the current mapping and replaces entries with the same UPC. <button class="btn sm" data-act="tpl" data-k="map">Download CSV template</button></div>
+    <div id="pv-map">${previewHtml('map')}</div></div>
+  <div class="stack">${m ? `<div class="rowflex"><span class="chip g">${fmt(m.rows.length)} mappings</span><span class="chip">${esc(m.filename)}</span><span class="chip">${new Date(m.uploadedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span></div>
+    ${snap ? `<div class="note ${un.length ? 'warn' : 'ok'}"><span>${fmt(items.length - un.length)} of ${fmt(items.length)} SKUs in the ${dateLabel(snap.date)} snapshot have a merchant SKU.${un.length ? ` ${fmt(un.length)} are unmapped.` : ''}</span></div>` : ''}
+    ${un.length ? `<div class="rowflex">${un.slice(0, 6).map(r => `<span class="chip y">${esc(r.nm.slice(0, 26))} · ${esc(r.upc || r.id)}</span>`).join('')}${un.length > 6 ? `<span class="sub">+${un.length - 6} more</span>` : ''}</div><div class="rowflex"><button class="btn sm" data-act="unmapped-csv">Download unmapped list (CSV)</button></div>` : ''}
+    <div class="rowflex"><button class="btn sm danger" data-act="clear-map">Clear mapping</button></div>` : '<div class="empty"><b>No mapping uploaded</b>Merchant SKU columns appear across the dashboard once you upload one.</div>'}</div></div></div>`;
+}
+
+/* ---------- TOP SELLERS ---------- */
+const TF = () => S.ui.tf || (S.ui.tf = { n: 20, rank: 'sold', q: '', mappedOnly: false, incOnly: false, sel: null, open: {} });
+function topData(snap) {
+  const f = TF(), st = S.settings;
+  let skuRows = enrich(aggregate(rowsOf(snap), 'sku'), 'sku');
+  const noDemand = skuRows.filter(r => r.dUnits == null).length;
+  if (f.mappedOnly) skuRows = skuRows.filter(r => mskuOf(r));
+  const ranked = skuRows.filter(r => r.dUnits != null).sort((a, b) => f.rank === 'sold' ? (b.dUnits - a.dUnits) || (b.sel - a.sel) : (b.sel - a.sel)).slice(0, f.n).map((r, i) => ({ ...r, rank: i + 1 }));
+  const q = f.q.toLowerCase();
+  const rows = ranked.filter(r => (!q || (r.nm + ' ' + r.id + ' ' + r.upc + ' ' + mskuOf(r)).toLowerCase().includes(q)) && (!f.incOnly || r.inc > 0));
+  const wh = enrich(aggregate(rowsOf(snap), 'skuwh'), 'skuwh');
+  return { rows, ranked, wh, noDemand, st };
+}
+function viewTop() {
+  const snap = activeSnap();
+  if (!snap) return `<div class="card"><div class="empty"><b>No inventory yet</b>Upload an inventory sheet to see your top sellers.<div style="margin-top:12px"><a class="btn primary" href="#upload">Go to upload</a></div></div></div>`;
+  const f = TF(), d = topData(snap), st = S.settings, rows = d.rows, W = st.windowDays;
+  const totSel = d.ranked.reduce((s, r) => s + r.sel, 0), totInc = d.ranked.reduce((s, r) => s + Math.max(r.inc, 0), 0);
+  const risk = d.ranked.filter(r => r.pstat === 'risk' || r.pstat === 'stockedout'), withInc = d.ranked.filter(r => r.inc > 0).length;
+  const low = d.ranked.filter(r => r.days != null && isFinite(r.days)).sort((a, b) => a.days - b.days)[0];
+  const sel = d.ranked.find(r => r.id === f.sel) || d.ranked[0];
+  const cols = `<th>#</th><th>Product</th><th>UPC</th>${hasMap() ? '<th>Merchant SKU</th>' : ''}<th class="r">Sold ${W}d</th><th class="r">Avg/day</th><th class="r">SOH</th><th class="r">Incoming</th><th class="r">SOH + incoming</th><th class="r">Days of stock</th><th class="r">Days incl. incoming</th><th>Status</th>`;
+  const colspan = hasMap() ? 12 : 11;
+  const body = rows.map(r => {
+    const open = !!f.open[r.id], pos = Math.max(r.sel, 0) + Math.max(r.inc, 0), dInc = r.dem > 0 ? pos / r.dem : r.dem === 0 ? Infinity : null;
+    let h = `<tr class="${r.id === sel?.id ? 'selrow' : ''}"><td><button class="btn sm" data-act="ts-open" data-id="${esc(r.id)}" aria-expanded="${open}" aria-label="Show warehouses for ${esc(r.nm)}">${open ? '▾' : '▸'} ${r.rank}</button></td>
+      <td class="wrap"><b>${esc(r.nm)}</b><div class="sub">${esc(r.br)}${r.uom ? ' · ' + esc(r.uom) : ''} · ${r.nw} warehouses</div></td><td class="num">${esc(r.upc)}</td>${hasMap() ? `<td>${mskuOf(r) ? `<span class="num">${esc(mskuOf(r))}</span>` : '<span class="chip y">Unmapped</span>'}</td>` : ''}
+      <td class="r"><b>${fmt(r.dUnits)}</b></td><td class="r">${fmt1(r.dem)}</td><td class="r"><b>${fmt(r.sel)}</b></td><td class="r">${r.inc > 0 ? `<span class="chip b">${fmt(r.inc)}</span>` : '0'}</td><td class="r">${fmt(pos)}</td>
+      <td class="r">${daysTxt(r.days)}</td><td class="r">${daysTxt(dInc)}</td><td>${chipHtml(r.pstat)}</td></tr>`;
+    if (open) {
+      const w = d.wh.filter(x => x.id === r.id).sort((a, b) => b.sel - a.sel);
+      h += `<tr><td colspan="${colspan}" style="background:var(--surface2)"><div class="tablewrap" style="background:var(--surface)"><table><thead><tr><th class="nosort">Warehouse</th><th class="nosort r">SOH</th><th class="nosort r">Incoming scheduled</th><th class="nosort r">Sold ${W}d</th><th class="nosort r">Days of stock</th><th class="nosort">Status</th></tr></thead><tbody>
+      ${w.map(x => `<tr><td>${esc(x.wn)}${isShut(x.wid, snap.date) ? ' <span class="chip r">Shutdown</span>' : ''}</td><td class="r"><b>${fmt(x.sel)}</b></td><td class="r">${x.inc > 0 ? `<span class="chip b">${fmt(x.inc)}</span>` : '0'}</td><td class="r">${fmt(x.dUnits)}</td><td class="r">${daysTxt(x.days)}</td><td><div class="tags">${x.flags.filter(z => z !== 'nodata').map(chipHtml).join('') || chipHtml('ok')}</div></td></tr>`).join('')}</tbody></table></div></td></tr>`;
+    }
+    return h;
+  }).join('');
+  return `
+  <div class="card"><div class="filters" style="margin:0;align-items:end">
+    <div class="field"><label for="t-n">Show top</label><select id="t-n" data-t="n">${[10, 20, 30, 50].map(n => `<option value="${n}" ${f.n === n ? 'selected' : ''}>${n} SKUs</option>`).join('')}</select></div>
+    <div class="field"><label>Rank by</label><div class="seg"><button data-act="t-rank" data-v="sold" aria-pressed="${f.rank === 'sold'}">Units sold (${W}d)</button><button data-act="t-rank" data-v="sel" aria-pressed="${f.rank === 'sel'}">Stock on hand</button></div></div>
+    <div class="field"><label for="t-q">Search</label><input id="t-q" type="search" data-t="q" value="${esc(f.q)}" placeholder="Name, UPC, SKU"></div>
+    <div class="field"><label>Filters</label><div class="rowflex"><button class="pill" data-act="t-inc" aria-pressed="${f.incOnly}">Has incoming</button>${hasMap() ? `<button class="pill" data-act="t-mapped" aria-pressed="${f.mappedOnly}">Mapped only</button>` : ''}</div></div>
+  </div></div>
+  ${d.noDemand ? `<div class="note warn"><span>${d.noDemand} SKU${d.noDemand > 1 ? 's have' : ' has'} no sales data and cannot be ranked. Upload sales data or a sheet with Last 7/15/30 days columns.</span></div>` : ''}
+  <div class="grid kpis">
+    <div class="kpi"><span class="l">SOH of top ${d.ranked.length}</span><span class="v num">${fmt(totSel)}</span><span class="s">sellable units, ${dateLabel(snap.date)}</span></div>
+    <div class="kpi"><span class="l">Scheduled incoming</span><span class="v num">${fmt(totInc)}</span><span class="s">${withInc} of ${d.ranked.length} SKUs have stock coming</span></div>
+    <button class="kpi crit" data-act="ts-risk"><span class="l">Stockout risk</span><span class="v num">${risk.length}</span><span class="s">${risk.length ? esc(risk.slice(0, 2).map(r => r.nm.slice(0, 22)).join(', ')) : 'none in the top list'}</span></button>
+    <div class="kpi"><span class="l">Lowest cover</span><span class="v num">${low ? daysTxt(low.days) + ' d' : '–'}</span><span class="s">${low ? esc(low.nm.slice(0, 34)) : 'no sales data'}</span></div>
+  </div>
+  <div class="grid cols2">
+    ${chartCard('Stock and incoming', 'Sellable units and scheduled incoming per top SKU', 'ch-top')}
+    ${chartCard('Stock history', sel ? esc(sel.nm.slice(0, 48)) : 'Select a SKU', 'ch-topsel')}
+  </div>
+  <div class="card"><header><div><h3>Top-selling SKUs</h3><p>Open a row for the warehouse split. Incoming is the "scheduled incoming" quantity from your sheet, which has no arrival dates.</p></div><div class="rowflex"><button class="btn sm" data-act="exp-top" data-v="csv">CSV</button><button class="btn sm" data-act="exp-top" data-v="xlsx">Excel</button></div></header>
+    <div class="tablewrap"><table><thead><tr>${cols}</tr></thead><tbody>${body || `<tr><td colspan="${colspan}"><div class="empty"><b>No SKUs to show</b>Adjust the filters above.</div></td></tr>`}</tbody></table></div>
+    <div class="pager"><span>Demand: ${st.source === 'sheet' ? 'inventory sheet' : 'uploaded sales, then inventory sheet'} · ${W}-day window (change in Planning)</span></div></div>`;
+}
+function chartsTop() {
+  const snap = activeSnap(); if (!snap || !$('#ch-top')) return; const d = topData(snap), rows = d.rows.slice(0, 20);
+  $('#ch-top').parentElement.style.height = Math.max(240, rows.length * 24 + 70) + 'px';
+  drawChart('ch-top', { type: 'bar', data: { labels: rows.map(r => r.nm.slice(0, 22) + (r.uom ? ' · ' + r.uom : '')), datasets: [{ label: 'SOH', data: rows.map(r => r.sel), backgroundColor: css('--chart1'), borderRadius: 3 }, { label: 'Incoming', data: rows.map(r => Math.max(r.inc, 0)), backgroundColor: css('--chart2'), borderRadius: 3 }] }, options: { indexAxis: 'y', plugins: { legend: { display: true, position: 'bottom' } }, scales: { x: { grid: { color: css('--grid') }, beginAtZero: true }, y: { grid: { display: false }, ticks: { autoSkip: false, font: { size: 10 } } } } } });
+  const sel = d.ranked.find(r => r.id === TF().sel) || d.ranked[0]; if (!sel) return;
+  const hist = latestPerDate().map(s => { const rs = rowsOf(s).filter(r => r.id === sel.id); return { d: s.date, sel: rs.reduce((a, r) => a + r.sel, 0), inc: rs.reduce((a, r) => a + Math.max(r.inc, 0), 0) }; });
+  if (hist.length < 2) { const b = $('#ch-topsel')?.parentElement; if (b) b.innerHTML = `<div class="empty"><b>History builds with each upload</b>Today: ${fmt(hist[0]?.sel)} in stock, ${fmt(hist[0]?.inc)} incoming.</div>`; return; }
+  drawChart('ch-topsel', { type: 'line', data: { labels: hist.map(h => dateLabel(h.d).slice(0, -5)), datasets: [{ label: 'SOH', data: hist.map(h => h.sel), borderColor: css('--chart1'), tension: .25, pointRadius: 3 }, { label: 'Incoming', data: hist.map(h => h.inc), borderColor: css('--chart2'), borderDash: [5, 4], tension: .25, pointRadius: 3 }] }, options: { plugins: { legend: { display: true, position: 'bottom' } } } });
+}
+
+/* ---------- warehouse status (active / shutdown) ---------- */
+S.whVer = 0;
+const whStatusMap = () => S.settings.whStatus || (S.settings.whStatus = {});
+function isShut(wid, date) {
+  const st = whStatusMap()[String(wid)];
+  if (!st || st.status !== 'shutdown') return false;
+  return !st.since || !date || date >= st.since;
+}
+const shutCount = () => Object.values(whStatusMap()).filter(s => s.status === 'shutdown').length;
+function rowsOf(s) {
+  if (S.settings.includeShut || !shutCount()) return s.rows;
+  return s.rows.filter(r => !isShut(r.wid, s.date));
+}
+const metaCache = new Map();
+function metaOf(s) {
+  if (S.settings.includeShut || !shutCount()) return s.meta;
+  const k = `${s.id}|${S.whVer}`; let m = metaCache.get(k);
+  if (!m) { m = summarize(rowsOf(s)); metaCache.set(k, m); }
+  return m;
+}
+function whChanged() { S.whVer++; metaCache.clear(); saveSettings(); render(); }
+function allWarehouses() {
+  const m = new Map();
+  for (const s of snapsSorted()) for (const r of s.rows) m.set(String(r.wid), r.wn);
+  return [...m].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+}
+function shutKpi(snap) {
+  if (!shutCount()) return '';
+  const rows = snap.rows.filter(r => isShut(r.wid, snap.date)); if (!rows.length) return '';
+  const sel = rows.reduce((s, r) => s + Math.max(r.sel, 0), 0), inc = rows.reduce((s, r) => s + Math.max(r.inc, 0), 0);
+  return `<a class="kpi crit" href="#warehouses" style="text-decoration:none;color:inherit"><span class="l">Stock in shutdown warehouses</span><span class="v num">${fmt(sel)}</span><span class="s">${inc ? `${fmt(inc)} incoming still scheduled` : 'no incoming scheduled'} · ${S.settings.includeShut ? 'included' : 'excluded'} above</span></a>`;
+}
+
+const WF = () => S.ui.wf || (S.ui.wf = { q: '', status: '', sel: {} });
+function viewWarehouses() {
+  const snap = activeSnap(), f = WF(), W = S.settings.windowDays, ws = whStatusMap();
+  if (!snap) return `<div class="card"><div class="empty"><b>No inventory yet</b>Upload an inventory sheet to list your warehouses.<div style="margin-top:12px"><a class="btn primary" href="#upload">Go to upload</a></div></div></div>`;
+  const stats = new Map();
+  for (const r of snap.rows) {
+    const k = String(r.wid), a = stats.get(k) || { sel: 0, inc: 0, skus: 0, sold: 0, soldKnown: false };
+    a.sel += Math.max(r.sel, 0); a.inc += Math.max(r.inc, 0); if (r.sel > 0) a.skus++;
+    const v = r['s' + W]; if (v != null) { a.sold += v; a.soldKnown = true; } stats.set(k, a);
+  }
+  const all = allWarehouses().map(w => ({ ...w, st: ws[w.id]?.status === 'shutdown' ? 'shutdown' : 'active', since: ws[w.id]?.since || '', note: ws[w.id]?.note || '', in: stats.has(w.id), s: stats.get(w.id) || { sel: 0, inc: 0, skus: 0, sold: 0 } }));
+  const q = f.q.toLowerCase(), rows = all.filter(w => (!q || (w.name + ' ' + w.id).toLowerCase().includes(q)) && (!f.status || w.st === f.status));
+  const shut = all.filter(w => w.st === 'shutdown' && isShut(w.id, snap.date)), act = all.length - all.filter(w => w.st === 'shutdown').length;
+  const stranded = shut.reduce((s, w) => s + w.s.sel, 0), incShut = shut.reduce((s, w) => s + w.s.inc, 0), demShut = shut.reduce((s, w) => s + w.s.sold, 0) / W;
+  const ro = !canEdit(), nsel = Object.keys(f.sel).filter(k => f.sel[k]).length;
+  return `
+  <div class="grid kpis">
+    <div class="kpi"><span class="l">Active warehouses</span><span class="v num">${act}</span><span class="s">of ${all.length} seen in uploads</span></div>
+    <div class="kpi ${shut.length ? 'crit' : ''}"><span class="l">Shutdown warehouses</span><span class="v num">${all.filter(w => w.st === 'shutdown').length}</span><span class="s">${shut.length} apply to ${dateLabel(snap.date)}</span></div>
+    <div class="kpi ${stranded ? 'warn' : ''}"><span class="l">SOH left in shutdown sites</span><span class="v num">${fmt(stranded)}</span><span class="s">units to transfer or write off</span></div>
+    <div class="kpi ${incShut ? 'crit' : ''}"><span class="l">Incoming to shutdown sites</span><span class="v num">${fmt(incShut)}</span><span class="s">${incShut ? 'reroute these orders' : 'nothing scheduled'}</span></div>
+    <div class="kpi"><span class="l">Sales at shutdown sites</span><span class="v num">${fmt1(demShut)}</span><span class="s">units/day over last ${W}d, now to be served elsewhere</span></div>
+  </div>
+  ${incShut ? `<div class="note warn"><span><b>${fmt(incShut)} units are still scheduled to arrive at shutdown warehouses.</b> They are excluded from planning while shutdown sites are hidden.</span></div>` : ''}
+  <div class="card"><header><div><h3>Warehouse status</h3><p>${ro ? 'Status is set by the admin.' : 'Mark each warehouse Active or Shutdown.'} Shutdown sites are removed from stock totals, alerts, top sellers, planning and comparisons. Their stock is shown separately above.</p></div></header>
+    <div class="filters" style="align-items:end">
+      <div class="field"><label for="w-q">Search warehouse</label><input id="w-q" type="search" data-w="q" value="${esc(f.q)}" placeholder="Name or ID"></div>
+      <div class="field"><label>Show</label><div class="seg">${[['', 'All'], ['active', 'Active'], ['shutdown', 'Shutdown']].map(([k, l]) => `<button data-act="wh-filter" data-v="${k}" aria-pressed="${f.status === k}">${l}</button>`).join('')}</div></div>
+      <div class="field"><label>Analysis</label><div class="seg"><button data-act="toggle-shut" data-v="0" aria-pressed="${!S.settings.includeShut}">Hide shutdown</button><button data-act="toggle-shut" data-v="1" aria-pressed="${!!S.settings.includeShut}">Include shutdown</button></div></div>
+    </div>
+    ${ro ? '' : `<div class="rowflex" style="margin-bottom:10px"><span class="sub">${nsel} selected</span><button class="btn sm" data-act="wh-bulk" data-v="shutdown" ${nsel ? '' : 'disabled'}>Mark selected as shutdown</button><button class="btn sm" data-act="wh-bulk" data-v="active" ${nsel ? '' : 'disabled'}>Mark selected as active</button><button class="btn sm" data-act="wh-selall">${rows.every(w => f.sel[w.id]) && rows.length ? 'Clear selection' : 'Select shown'}</button><button class="btn sm danger" data-act="wh-reset">Set all active</button></div>`}
+    <div class="tablewrap"><table><thead><tr><th class="nosort"></th><th class="nosort">Warehouse</th><th class="nosort">Status</th><th class="nosort">Shutdown from</th><th class="nosort">Note</th><th class="nosort r">SOH</th><th class="nosort r">Incoming</th><th class="nosort r">SKUs in stock</th><th class="nosort r">Sold ${W}d</th></tr></thead><tbody>
+    ${rows.map(w => `<tr><td>${ro ? '' : `<input type="checkbox" aria-label="Select ${esc(w.name)}" data-wsel="${esc(w.id)}" ${f.sel[w.id] ? 'checked' : ''}>`}</td>
+      <td class="wrap"><b>${esc(w.name)}</b><div class="sub">ID ${esc(w.id)}${w.in ? '' : ' · not in latest sheet'}</div></td>
+      <td>${ro ? (w.st === 'shutdown' ? '<span class="chip r">Shutdown</span>' : '<span class="chip g">Active</span>') : `<div class="seg nw"><button data-act="wh-set" data-id="${esc(w.id)}" data-v="active" aria-pressed="${w.st === 'active'}">Active</button><button data-act="wh-set" data-id="${esc(w.id)}" data-v="shutdown" aria-pressed="${w.st === 'shutdown'}" ${w.st === 'shutdown' ? 'style="background:var(--crit);color:#fff"' : ''}>Shutdown</button></div>`}</td>
+      <td>${ro ? (w.st === 'shutdown' ? (w.since ? dateLabel(w.since) : 'All dates') : '–') : w.st === 'shutdown' ? `<input type="date" aria-label="Shutdown from date for ${esc(w.name)}" data-whdate="${esc(w.id)}" value="${esc(w.since)}" style="min-height:32px;border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:2px 6px">${w.since ? '' : '<div class="sub">all dates</div>'}` : '<span class="sub">–</span>'}</td>
+      <td>${ro ? esc(w.note) : w.st === 'shutdown' ? `<input type="text" aria-label="Note for ${esc(w.name)}" data-whnote="${esc(w.id)}" value="${esc(w.note)}" placeholder="Optional" maxlength="80" style="min-height:32px;width:150px;border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:2px 8px">` : ''}</td>
+      <td class="r"><b>${fmt(w.s.sel)}</b></td><td class="r">${w.s.inc ? `<span class="chip b">${fmt(w.s.inc)}</span>` : '0'}</td><td class="r">${fmt(w.s.skus)}</td><td class="r">${w.in ? fmt(w.s.sold) : '–'}</td></tr>`).join('') || `<tr><td colspan="9"><div class="empty"><b>No warehouses match</b></div></td></tr>`}
+    </tbody></table></div>
+    <p class="sub" style="margin-top:10px">"Shutdown from" decides which uploads are affected: snapshots dated on or after that day. Earlier history stays as it was. Marking a site shutdown sets this to the latest snapshot date (${dateLabel(dateList()[0])}). Clear the date to apply it to all dates. Figures in this table are for the ${dateLabel(snap.date)} snapshot, before any exclusion.</p>
+  </div>`;
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]'); if (!b) return; const a = b.dataset.act, f = WF(), ws = whStatusMap();
+  if (['wh-set', 'wh-bulk', 'wh-reset'].includes(a) && !canEdit()) { toast('Admin sign-in required'); return; }
+  if (a === 'toggle-shut') { S.settings.includeShut = b.dataset.v ? b.dataset.v === '1' : !S.settings.includeShut; whChanged(); }
+  else if (a === 'wh-filter') { f.status = b.dataset.v; render(); }
+  else if (a === 'wh-set') setWh([b.dataset.id], b.dataset.v);
+  else if (a === 'wh-bulk') setWh(Object.keys(f.sel).filter(k => f.sel[k]), b.dataset.v);
+  else if (a === 'wh-selall') { const q = f.q.toLowerCase(), vis = allWarehouses().filter(w => (!q || (w.name + ' ' + w.id).toLowerCase().includes(q)) && (!f.status || (ws[w.id]?.status === 'shutdown' ? 'shutdown' : 'active') === f.status)); const allOn = vis.length && vis.every(w => f.sel[w.id]); vis.forEach(w => f.sel[w.id] = !allOn); render(); }
+  else if (a === 'wh-reset') { if (typeof armed === 'function' && !armed(b, 'Confirm set all active?')) return; S.settings.whStatus = {}; f.sel = {}; toast('All warehouses set to active'); whChanged(); }
+});
+function setWh(ids, status) {
+  const ws = whStatusMap(), first = dateList()[0] || '';
+  logAct(`Marked ${ids.length} warehouse${ids.length > 1 ? 's' : ''} as ${status}`);
+  for (const id of ids) {
+    if (status === 'active') delete ws[id]; else ws[id] = { ...(ws[id] || {}), status: 'shutdown', since: ws[id]?.status === 'shutdown' ? ws[id].since : first };
+  }
+  whChanged();
+}
+document.addEventListener('change', e => {
+  const t = e.target;
+  if ((t.dataset.whdate || t.dataset.whnote) && !canEdit()) return;
+  if (t.dataset.wsel != null && t.dataset.wsel !== '') { WF().sel[t.dataset.wsel] = t.checked; render(); }
+  else if (t.dataset.whdate) { const s = whStatusMap()[t.dataset.whdate]; if (s) { s.since = t.value; whChanged(); } }
+  else if (t.dataset.whnote) { const s = whStatusMap()[t.dataset.whnote]; if (s) { s.note = t.value; saveSettings(); } }
+});
+document.addEventListener('input', e => { const t = e.target; if (t.dataset.w === 'q') { WF().q = t.value; rerenderSoon(); } });
+
+/* ---------- render + router ---------- */
+const VIEWS = { dashboard: viewDashboard, 'top-sellers': viewTop, warehouses: viewWarehouses, upload: viewUpload, history: viewHistory, compare: viewCompare, planning: viewPlanning };
+const AFTER = { dashboard: chartsDashboard, 'top-sellers': chartsTop, history: chartsHistory, compare: chartsCompare };
+function render() {
+  const a = document.activeElement, fid = a && a.id && /^(f-q|f-sku|c-q|p-q|t-q|w-q)$/.test(a.id) ? a.id : null, pos = fid ? a.selectionStart : null;
+  const y = window.scrollY;
+  renderNav(); renderTop();
+  try { $('#page').innerHTML = VIEWS[S.ui.tab](); } catch (e) { $('#page').innerHTML = `<div class="note crit">Something went wrong drawing this page: ${esc(e.message)}</div>`; console.error(e); }
+  try { AFTER[S.ui.tab]?.(); } catch (e) { console.error(e); }
+  if (fid) { const n = document.getElementById(fid); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) { } } }
+  window.scrollTo(0, y);
+}
+function route() { const h = location.hash.slice(1); S.ui.tab = VIEWS[h] ? h : 'dashboard'; render(); if (!S.ui.noScroll) window.scrollTo(0, 0); }
+window.addEventListener('hashchange', route);
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => render());
+new MutationObserver(() => render()).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+/* ---------- exports ---------- */
+async function exportTable(base, head, rows, v) { if (v === 'csv') await saveFile(base + '.csv', toCsv(head, rows)); else await saveFile(base + '.xlsx', toXlsx({ Report: [head, ...rows] })); }
+const lvlName = l => l === 'sku' ? 'sku' : l === 'wh' ? 'warehouse' : 'sku-warehouse';
+
+/* ---------- click actions ---------- */
+function armed(btn, label) { if (btn.dataset.armed) return true; btn.dataset.armed = '1'; btn.dataset.orig = btn.textContent; btn.textContent = label; btn.classList.add('armed'); setTimeout(() => { if (btn.isConnected) { btn.textContent = btn.dataset.orig; btn.classList.remove('armed'); delete btn.dataset.armed; } }, 4000); return false; }
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]'); if (!b) return; const act = b.dataset.act, v = b.dataset.v, id = b.dataset.id, df = DF();
+  if (MUT.has(act) && !canEdit()) { toast('Admin sign-in required'); return; }
+  const snap = activeSnap();
+  switch (act) {
+    case 'snapdate': break;
+    case 'level': df.level = v; ts('dash').page = 0; render(); break;
+    case 'status': df.status = df.status === v ? '' : v; ts('dash').page = 0; if (S.ui.tab !== 'dashboard') location.hash = '#dashboard'; else render(); break;
+    case 'exp-view': { const rows = applyDashFilter(dashRows(snap)); await exportTable(`inventory-${snap.date}`, ['SKU', 'Product', 'Category', 'Warehouse', 'Stock (SOH)', 'Incoming', 'Unsellable', `Sold ${S.settings.windowDays}d`, 'Days of stock', 'Flags'], rows.map(r => [r.id, r.nm, r.cat, df.level === 'skuwh' ? r.wn : r.nw + ' warehouses', r.sel, r.inc, r.uns, r.dUnits, r.days == null ? 'No data' : r.days === Infinity ? 'No sales' : Math.round(r.days * 10) / 10, r.flags.map(f => STAT[f][0]).join('; ')]), v); break; }
+    case 'up-clear': S.up[b.dataset.k] = null; render(); break;
+    case 'up-save': b.disabled = true; await saveUpload(b.dataset.k); break;
+    case 'issues-csv': { const p = S.up[b.dataset.k].parsed; await saveFile('validation-issues.csv', toCsv(['Row', 'Level', 'Field', 'Issue'], p.issues.map(i => [i.row, i.sev, i.field, i.msg]))); break; }
+    case 'tpl': await saveFile(b.dataset.k === 'inv' ? 'inventory-template.csv' : 'sales-template.csv', templateCsv(b.dataset.k)); break;
+    case 'del-sales': if (!armed(b, 'Confirm remove?')) return; S.sales = S.sales.filter(s => s.id !== id); await Store.del('sales', id); buildSalesIdx(); toast('Sales upload removed'); render(); break;
+    case 'del-snap': { if (!armed(b, 'Confirm delete?')) return; const gone = snapById(id); S.snaps = S.snaps.filter(s => s.id !== id); await Store.del('snaps', id); if (gone) { S.trash.unshift(gone); S.trash = S.trash.slice(0, 15); await Store.put('kv', S.trash, 'trash'); logAct(`Deleted snapshot ${gone.date} (${gone.filename})`); } if (S.ui.snapId === id) S.ui.snapId = null; toast('Snapshot moved to the recycle bin on the Upload page'); render(); break; }
+    case 'open-snap': S.ui.snapId = id; location.hash = '#dashboard'; break;
+    case 'exp-snap': { const s = snapById(id); if (v === 'csv') await saveFile(`inventory-${s.date}.csv`, toCsv(INV_HEAD, s.rows.map(r => invRow(s.date, r)))); else await saveFile(`inventory-${s.date}.xlsx`, toXlsx(snapSheets(s))); break; }
+    case 'exp-month': { const m = b.dataset.m, ms = monthSummary(m);
+      await saveFile(`inventory-report-${m}.xlsx`, toXlsx({ 'Daily summary': [['Date', 'SKUs', 'Warehouses', 'Lines', 'Sellable units', 'Unsellable units', 'Out-of-stock lines', 'File'], ...ms.snaps.map(s => [s.date, metaOf(s).skus, metaOf(s).whs, metaOf(s).lines, metaOf(s).sel, metaOf(s).uns, metaOf(s).oos, s.filename])], 'Closing stock': [INV_HEAD, ...ms.last.rows.map(r => invRow(ms.last.date, r))] })); break; }
+    case 'exp-all': {
+      const sn = latestPerDate();
+      if (v === 'csv') await saveFile('inventory-history.csv', toCsv(INV_HEAD, sn.flatMap(s => s.rows.map(r => invRow(s.date, r)))));
+      else await saveFile('inventory-history.xlsx', toXlsx({ 'Daily summary': [['Date', 'SKUs', 'Lines', 'Sellable units', 'Unsellable units', 'Out-of-stock lines'], ...sn.map(s => [s.date, metaOf(s).skus, metaOf(s).lines, metaOf(s).sel, metaOf(s).uns, metaOf(s).oos])], 'Monthly summary': [['Month', 'Days', 'Opening', 'Closing', 'Average', 'Low', 'High'], ...monthsList().slice().reverse().map(m => { const x = monthSummary(m); return [m, x.n, x.open, x.close, Math.round(x.avg), x.min, x.max]; })] })); break; }
+    case 'cmp-months': Object.assign(CF(), { mode: 'month', ma: b.dataset.a, mb: b.dataset.b }); location.hash = '#compare'; break;
+    case 'cmode': CF().mode = v; ts('cmp').page = 0; render(); break;
+    case 'clevel': CF().level = v; ts('cmp').page = 0; render(); break;
+    case 'cbasis': CF().basis = v; render(); break;
+    case 'cshow': CF().show = v; ts('cmp').page = 0; render(); break;
+    case 'exp-cmp': { const d = compareData(), f = CF(); await exportTable(`comparison-${f.mode}`, ['ID', 'Name', 'Warehouse', d.la, d.lb, 'Change', 'Change %', 'State'], d.rows.map(r => [r.id, r.nm, r.wn || '', r.a, r.b, r.delta, r.pct == null ? '' : Math.round(r.pct * 10) / 10, r.state]), v); break; }
+    case 'ts-open': { const t = TF(); t.open[id] = !t.open[id]; t.sel = id; render(); break; }
+    case 't-rank': TF().rank = v; render(); break;
+    case 't-inc': TF().incOnly = !TF().incOnly; render(); break;
+    case 't-mapped': TF().mappedOnly = !TF().mappedOnly; render(); break;
+    case 'ts-risk': { const t = TF(); t.q = ''; t.incOnly = false; render(); break; }
+    case 'unmapped-csv': { const items = [...new Map(snap.rows.map(r => [r.id, r])).values()].filter(r => !mskuOf(r)); await saveFile('unmapped-skus.csv', toCsv(['Item ID', 'Product', 'UPC'], items.map(r => [r.id, r.nm, r.upc]))); break; }
+    case 'clear-map': if (!armed(b, 'Confirm clear mapping?')) return; S.map = null; await Store.put('kv', null, 'skumap'); buildMapIdx(); toast('Mapping cleared'); render(); break;
+    case 'exp-top': { const d = topData(snap), W = S.settings.windowDays;
+      const head = ['Rank', 'Product', 'UPC', 'Merchant SKU', `Sold ${W}d`, 'Avg daily sales', 'SOH', 'Incoming scheduled', 'SOH + incoming', 'Days of stock', 'Status'];
+      const rows = d.rows.map(r => [r.rank, r.nm, r.upc, mskuOf(r), r.dUnits, Math.round(r.dem * 100) / 100, r.sel, r.inc, Math.max(r.sel, 0) + Math.max(r.inc, 0), r.days == null ? 'No data' : r.days === Infinity ? 'No sales' : Math.round(r.days * 10) / 10, STAT[r.pstat][0]]);
+      if (v === 'csv') await saveFile(`top-sellers-${snap.date}.csv`, toCsv(head, rows)); else await saveFile(`top-sellers-${snap.date}.xlsx`, toXlsx({ 'Top SKUs': [head, ...rows], 'By warehouse': [['Product', 'UPC', 'Merchant SKU', 'Warehouse', 'SOH', 'Incoming scheduled', `Sold ${W}d`], ...d.rows.flatMap(r => d.wh.filter(x => x.id === r.id).map(x => [x.nm, x.upc, mskuOf(x), x.wn, x.sel, x.inc, x.dUnits]))] })); break; }
+    case 'pstat': PF().status = PF().status === v ? '' : v; ts('plan').page = 0; render(); break;
+    case 'plevel': PF().level = v; PF().wh = ''; ts('plan').page = 0; render(); break;
+    case 'reset-set': S.settings = { ...DEFAULTS, ...(S.published?.settings || {}), overrides: {}, whStatus: S.settings.whStatus, includeShut: S.settings.includeShut }; saveSettings(); buildSalesIdx(); toast('Assumptions reset'); render(); break;
+    case 'exp-plan': { const f = PF(), rows = enrich(aggregate(rowsOf(snap), f.level), f.level), st = S.settings;
+      await exportTable(`replenishment-plan-${snap.date}`, ['SKU', 'Product', 'Warehouse', 'Stock', 'Incoming', `Avg daily sales (${st.windowDays}d)`, 'Demand source', 'Days of stock', 'Lead time (d)', 'Safety (d)', 'Reorder point', 'Target stock', 'Suggested order', 'Status'],
+        rows.map(r => [r.id, r.nm, f.level === 'skuwh' ? r.wn : 'All', r.sel, r.inc, r.dem == null ? 'No data' : Math.round(r.dem * 100) / 100, r.demSrc, r.days == null ? 'No data' : r.days === Infinity ? 'No sales' : Math.round(r.days * 10) / 10, r.lead, r.safe, r.rop ?? '', r.target ?? '', r.sugg ?? 'No data', STAT[r.pstat][0]]), v); break; }
+    case 'backup': await saveFile(`soh-backup-${todayStr()}.json`, JSON.stringify({ app: 'soh-tracker', v: 1, snaps: S.snaps, sales: S.sales, settings: S.settings })); break;
+    case 'wipe': if (!armed(b, 'Confirm erase everything?')) return; S.snaps = []; S.sales = []; S.map = null; S.ui.snapId = null; await Store.clear('snaps'); await Store.clear('sales'); await Store.put('kv', null, 'skumap'); await Store.put('kv', true, 'seeded'); buildSalesIdx(); buildMapIdx(); logAct('Erased all data'); toast('All data erased'); render(); break;
+  }
+});
+
+/* ---------- change/input handlers ---------- */
+const rerenderSoon = debounce(render, 180);
+document.addEventListener('input', e => {
+  const t = e.target;
+  if (t.dataset.f && (t.dataset.f === 'q' || t.dataset.f === 'sku')) { DF()[t.dataset.f] = t.value; ts('dash').page = 0; rerenderSoon(); }
+  else if (t.dataset.c === 'q') { CF().q = t.value; ts('cmp').page = 0; rerenderSoon(); }
+  else if (t.dataset.t === 'q') { TF().q = t.value; rerenderSoon(); }
+  else if (t.dataset.p === 'q') { PF().q = t.value; ts('plan').page = 0; rerenderSoon(); }
+});
+document.addEventListener('change', async e => {
+  const t = e.target, d = t.dataset;
+  if ((d.file || d.upDate) && !canEdit()) return;
+  if (d.act === 'snapdate') { S.ui.snapId = snapForDate(t.value).id; render(); }
+  else if (d.act === 'snapver') { S.ui.snapId = t.value; render(); }
+  else if (d.f && d.f !== 'q' && d.f !== 'sku') { DF()[d.f] = t.value; ts('dash').page = 0; render(); }
+  else if (d.c && d.c !== 'q') { CF()[d.c] = t.value; ts('cmp').page = 0; render(); }
+  else if (d.p && d.p !== 'q') { PF()[d.p] = t.value; ts('plan').page = 0; render(); }
+  else if (d.t && d.t !== 'q') { TF()[d.t] = d.t === 'n' ? +t.value : t.value; render(); }
+  else if (d.set) { const k = d.set; let v = t.value; if (k === 'inclInc') v = v === '1'; else if (k === 'source') { } else { v = Math.max(+t.min || 0, +v || 0); } S.settings[k] = k === 'windowDays' ? +v : v; saveSettings(); buildSalesIdx(); render(); }
+  else if (d.ov) { const o = S.settings.overrides[d.id] || (S.settings.overrides[d.id] = {}); const v = Math.max(0, +t.value || 0); if (v === S.settings[d.ov]) delete o[d.ov]; else o[d.ov] = v; if (!Object.keys(o).length) delete S.settings.overrides[d.id]; saveSettings(); render(); }
+  else if (d.upDate) { const u = S.up[d.upDate] || (S.up[d.upDate] = { file: '' }); u.date = t.value; u.touched = true; if (u.parsed) render(); }
+  else if (d.file === 'inv' || d.file === 'sales' || d.file === 'map') { await handleFile(d.file, t.files[0]); }
+  else if (d.file === 'restore') { await restore(t.files[0]); }
+});
+['dragover', 'dragleave', 'drop'].forEach(ev => document.addEventListener(ev, e => {
+  const z = e.target.closest?.('.drop'); if (!z) return; e.preventDefault();
+  if (ev === 'dragover') z.classList.add('over'); else z.classList.remove('over');
+  if (ev === 'drop') handleFile(z.id.replace('drop-', ''), e.dataTransfer.files[0]);
+}));
+async function restore(file) {
+  if (!file) return;
+  try {
+    const j = JSON.parse(await file.text()); if (j.app !== 'soh-tracker') throw new Error('Not a backup from this dashboard');
+    for (const s of j.snaps || []) { if (!snapById(s.id)) S.snaps.push(s); await Store.put('snaps', s); }
+    for (const s of j.sales || []) { if (!S.sales.find(x => x.id === s.id)) S.sales.push(s); await Store.put('sales', s); }
+    if (j.settings) { S.settings = { ...DEFAULTS, ...j.settings, whStatus: { ...(j.settings.whStatus || {}) } }; S.whVer++; metaCache.clear(); await Store.put('kv', S.settings, 'settings'); }
+    buildSalesIdx(); toast(`Restored ${(j.snaps || []).length} snapshots`); render();
+  } catch (e) { toast('Restore failed: ' + e.message); }
+}
+
+
+/* ---------- access control, publishing, safeguards, boot ---------- */
+S.mode = 'local'; S.admin = false; S.ghToken = null; S.ghRepo = ''; S.autoPub = true; S.pubBusy = false; S.pubErr = ''; S.lastPubStr = ''; S.lastPubAt = 0; S.trash = []; S.log = []; S.published = null; S.dirty = false; S.localHash = null;
+const canEdit = () => S.mode !== 'published' || S.admin;
+const MUT = new Set(['up-save', 'del-sales', 'del-snap', 'clear-map', 'wipe', 'restore-snap', 'purge-snap', 'publish', 'discard-draft', 'download-bundle']);
+const PLAN_KEYS = ['windowDays', 'lead', 'safe', 'review', 'excess', 'slowMax30', 'lowUnits', 'inclInc', 'roundTo', 'source', 'overrides', 'whStatus'];
+
+/* pack / unpack for compact files */
+const packRow = r => [r.id, r.nm, r.br, r.upc, r.uom, r.wid, r.wn, r.cat, r.sel, r.inc, r.uns, r.dmg, r.lost, r.exp, r.nex, r.s7, r.s15, r.s30];
+const unpackRow = a => ({ id: String(a[0]), nm: a[1], br: a[2], upc: a[3], uom: a[4], wid: String(a[5]), wn: a[6], cat: a[7], sel: a[8], inc: a[9], uns: a[10], dmg: a[11], lost: a[12], exp: a[13], nex: a[14], s7: a[15], s15: a[16], s30: a[17] });
+const packSnap = s => ({ id: s.id, date: s.date, uploadedAt: s.uploadedAt, filename: s.filename, hash: s.hash, rows: s.rows.map(packRow) });
+const unpackSnap = s => { const rows = s.rows.map(unpackRow); return { id: s.id, date: s.date, uploadedAt: s.uploadedAt, filename: s.filename, hash: s.hash, rows, meta: summarize(rows) }; };
+function rowsHash(rows) { let h = 5381; const s = rows.map(r => `${r.id}|${r.wid}|${r.sel}|${r.inc}`).join(';'); for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return rows.length + ':' + (h >>> 0).toString(36); }
+
+/* activity log */
+function logAct(msg) { S.log.unshift({ t: Date.now(), msg }); S.log = S.log.slice(0, 200); Store.put('kv', S.log, 'log'); }
+
+/* admin identity: a GitHub token that can write to the repository (GitHub enforces the permission) */
+const GH = 'https://api.github.com';
+const ghHeaders = () => ({ Authorization: `Bearer ${S.ghToken}`, Accept: 'application/vnd.github+json' });
+function guessRepo() {
+  try { const saved = localStorage.getItem('soh-repo'); if (saved) return saved; } catch (e) { }
+  const h = location.hostname, parts = location.pathname.split('/').filter(Boolean);
+  if (h.endsWith('.github.io')) { const owner = h.split('.')[0]; const repo = parts[0] && !/\.html?$/.test(parts[0]) ? parts[0] : `${owner}.github.io`; return `${owner}/${repo}`; }
+  return '';
+}
+async function ghConnect(repo, token) {
+  repo = repo.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, ''); token = token.trim();
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return 'Enter the repository as owner/name, for example varunjain-AMWOODO/Blinkit-Stock-Updates.';
+  if (!token) return 'Paste your GitHub token.';
+  let r; try { r = await fetch(`${GH}/repos/${repo}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } }); } catch (e) { return 'Could not reach GitHub. Check your connection.'; }
+  if (r.status === 401) return 'GitHub did not accept that token. It may be wrong or expired.';
+  if (r.status === 404) return 'Repository not found, or the token does not have access to it.';
+  if (!r.ok) return `GitHub said ${r.status}.`;
+  const j = await r.json(); if (j.permissions && j.permissions.push === false) return 'This token cannot write to the repository. Give it Contents: Read and write.';
+  S.ghToken = token; S.ghRepo = repo; S.admin = true; S.pubErr = '';
+  try { sessionStorage.setItem('soh-gh', JSON.stringify({ token, repo })); localStorage.setItem('soh-repo', repo); } catch (e) { }
+  if (S.mode === 'published') { loadBase(); await tryDraft(); }
+  logAct('Admin signed in'); return '';
+}
+function adminLogout() {
+  S.admin = false; S.ghToken = null; try { sessionStorage.removeItem('soh-gh'); } catch (e) { }
+  if (S.mode === 'published') loadBase(); S.up = { inv: null, sales: null }; toast('Signed out'); render();
+}
+const b64 = str => { const bytes = new TextEncoder().encode(str); let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(bin); };
+const bundleBody = () => { const settings = {}; PLAN_KEYS.forEach(k => settings[k] = S.settings[k]); return { snaps: S.snaps.map(packSnap), sales: S.sales, map: S.map, settings }; };
+async function publishNow(why) {
+  if (!S.ghToken || !canEdit()) return;
+  if (S.pubBusy) { S.pubAgain = true; return; }
+  const body = bundleBody(), str = JSON.stringify(body);
+  if (why === 'auto' && str === S.lastPubStr) return;
+  S.pubBusy = true; S.pubErr = ''; renderTop();
+  try {
+    const bundle = { app: 'soh-tracker', v: 2, publishedAt: Date.now(), adminHash: null, ...body };
+    const url = `${GH}/repos/${S.ghRepo}/contents/soh-data.json`; let sha;
+    const g = await fetch(url, { headers: ghHeaders() });
+    if (g.ok) sha = (await g.json()).sha; else if (g.status !== 404) throw new Error(g.status === 401 ? 'The token was rejected. Sign in again.' : `GitHub said ${g.status}`);
+    const r = await fetch(url, { method: 'PUT', headers: { ...ghHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ message: `Update stock data ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`, content: b64(JSON.stringify(bundle)), sha }) });
+    if (!r.ok) throw new Error(r.status === 401 ? 'The token was rejected. Sign in again.' : r.status === 403 || r.status === 404 ? 'The token cannot write to this repository. It needs Contents: Read and write.' : r.status === 409 || r.status === 422 ? 'Someone else published at the same moment. Reload the page and try again.' : `GitHub said ${r.status}`);
+    S.lastPubStr = str; S.lastPubAt = Date.now(); S.dirty = false; if (S.mode === 'published') S.published = bundle; await Store.put('kv', null, 'draft');
+    logAct(`Published to GitHub: ${S.snaps.length} snapshots`); toast(S.mode === 'published' ? 'Published. Visitors see it in about a minute.' : 'Published. Reload this page in a minute to switch to locked mode.');
+  } catch (e) { S.pubErr = e.message || String(e); toast('Publish failed: ' + S.pubErr); }
+  finally { S.pubBusy = false; renderTop(); if (S.ui.tab === 'upload') render(); if (S.pubAgain) { S.pubAgain = false; schedAuto(); } }
+}
+const schedAuto = debounce(() => publishNow('auto'), 3000);
+
+/* published data (read-only for visitors) */
+function loadBase() {
+  const b = S.published;
+  S.snaps = (b.snaps || []).map(unpackSnap); S.sales = b.sales || []; S.map = b.map || null;
+  S.settings = { ...DEFAULTS, ...(b.settings || {}), overrides: { ...(b.settings?.overrides || {}) }, whStatus: { ...(b.settings?.whStatus || {}) }, includeShut: false };
+  S.ui.snapId = null; S.dirty = false; S.whVer++; metaCache.clear(); buildMapIdx(); buildSalesIdx();
+}
+async function tryDraft() {
+  const d = await Store.getKv('draft');
+  if (d && d.base === S.published.publishedAt) {
+    S.snaps = d.snaps.map(unpackSnap); S.sales = d.sales || []; S.map = d.map || null;
+    S.settings = { ...DEFAULTS, ...d.settings, overrides: { ...(d.settings?.overrides || {}) }, whStatus: { ...(d.settings?.whStatus || {}) } };
+    S.dirty = true; S.whVer++; metaCache.clear(); buildMapIdx(); buildSalesIdx();
+  }
+}
+const saveDraft = debounce(async () => {
+  if (S.mode !== 'published' || !S.admin) return; S.dirty = true;
+  try { await Store.put('kv', { base: S.published.publishedAt, savedAt: Date.now(), snaps: S.snaps.map(packSnap), sales: S.sales, map: S.map, settings: S.settings }, 'draft'); } catch (e) { }
+  renderTop(); if (S.autoPub && S.ghToken) schedAuto();
+}, 300);
+/* wrong-file review for inventory uploads */
+function reviewInv(p, date, u) {
+  const cur = summarize(p.rows), flags = []; let major = false;
+  const add = (lvl, msg) => { flags.push(`<li>${esc(msg)}</li>`); if (lvl === 'major') major = true; };
+  if (p.stamp && p.stamp !== date) add('major', `The sheet says it was generated on ${dateLabel(p.stamp)} but the chosen inventory date is ${dateLabel(date)}.`);
+  const dupSnap = S.snaps.find(s => s.hash && s.hash === rowsHash(p.rows));
+  if (dupSnap) add('major', `The stock figures are identical to the snapshot of ${dateLabel(dupSnap.date)} (${dupSnap.filename}). This may be the same file uploaded twice.`);
+  const others = latestPerDate().filter(s => s.date !== date).sort((a, b) => Math.abs(dayNum(a.date) - dayNum(date)) - Math.abs(dayNum(b.date) - dayNum(date)));
+  let cmp = '';
+  if (!others.length) cmp = 'This is the first snapshot, so there is nothing to compare against.';
+  else {
+    const prev = others[0], pm = prev.meta, pct = (a, b) => b ? (a - b) / b : 0;
+    const dS = pct(cur.skus, pm.skus), dU = pct(cur.sel, pm.sel);
+    cmp = `Compared with ${dateLabel(prev.date)}: SKUs ${fmt(pm.skus)} → ${fmt(cur.skus)}, sellable units ${fmt(pm.sel)} → ${fmt(cur.sel)}, warehouses ${fmt(pm.whs)} → ${fmt(cur.whs)}.`;
+    if (Math.abs(dS) > .25) add('major', `The number of SKUs changed by ${Math.round(dS * 100)}%.`);
+    if (Math.abs(dU) > .5) add('major', `Total sellable stock changed by ${Math.round(dU * 100)}%.`); else if (Math.abs(dU) > .25) add('minor', `Total sellable stock changed by ${Math.round(dU * 100)}%.`);
+    const had = new Set(prev.rows.filter(r => r.sel > 0).map(r => String(r.wid))), has = new Set(p.rows.map(r => String(r.wid))), missing = [...had].filter(w => !has.has(w));
+    if (missing.length >= 3 || (had.size && missing.length / had.size > .15)) add('major', `${missing.length} warehouses that held stock on ${dateLabel(prev.date)} are missing from this file.`); else if (missing.length) add('minor', `${missing.length} warehouse${missing.length > 1 ? 's' : ''} from the previous snapshot are missing.`);
+    const zs = r => r.lines ? r.oos / r.lines : 0; if (zs(cur) > zs(pm) + .25) add('major', `Out-of-stock lines jumped from ${Math.round(zs(pm) * 100)}% to ${Math.round(zs(cur) * 100)}% of all lines.`);
+  }
+  const html = `<div class="note ${major ? 'warn' : 'info'}" style="flex-direction:column"><b>${major ? 'Review before saving' : 'Checked against your history'}</b><span>${esc(cmp)}</span>${flags.length ? `<ul style="margin:0;padding-left:18px">${flags.join('')}</ul>` : '<span>No unusual differences found.</span>'}
+    ${major ? `<label class="rowflex" style="cursor:pointer"><input type="checkbox" id="ack-inv" data-ack="inv" ${u.ack ? 'checked' : ''}> <b>I have checked this file and want to save it</b></label>` : ''}</div>`;
+  return { major, html };
+}
+
+/* upload-page cards */
+const TOKEN_HELP = `<details><summary class="sub" style="cursor:pointer">How to create the token (2 minutes, once)</summary><ol class="sub" style="margin:8px 0 0;padding-left:18px"><li>On GitHub open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Settings → Developer settings → Fine-grained tokens → Generate new token</a>.</li><li>Under Repository access choose "Only select repositories" and pick this site's repository.</li><li>Under Permissions → Repository permissions set <b>Contents</b> to "Read and write".</li><li>Set an expiry (for example 90 days), generate, and copy the token. Paste it here. It starts with <b>github_pat_</b>.</li></ol></details>`;
+const ghForm = (id, btn) => `<form class="stack" id="${id}" autocomplete="off"><div class="grid cols2"><div class="field"><label for="${id}-repo">GitHub repository (owner/name)</label><input id="${id}-repo" value="${esc(guessRepo())}" placeholder="owner/repository" autocapitalize="off" spellcheck="false"></div>
+  <div class="field"><label for="${id}-tok">GitHub token</label><input id="${id}-tok" type="password" autocomplete="off" placeholder="github_pat_…"></div></div>
+  <div class="rowflex"><button class="btn primary" type="submit">${btn}</button><span id="${id}-msg" class="sub" role="alert"></span></div></form>${TOKEN_HELP}`;
+function lockedHtml() {
+  return `<div class="card" style="max-width:720px"><header><div><h3>Admin sign-in</h3><p>This site shows data published by the admin. You can browse, filter and download reports. To upload or change data, sign in with a GitHub token that can write to the site's repository. GitHub decides who is allowed. The token is kept only in this browser tab and is removed when you sign out or close the tab.</p></div></header>${ghForm('adm-form', 'Sign in')}</div>`;
+}
+function adminCards() {
+  const pub = S.published, when = d => new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const conn = !!S.ghToken;
+  const publishCard = `<div class="card"><header><div><h3>Publishing</h3><p>${pub ? `Visitors see the data published on ${when(pub.publishedAt)}. Only people who can write to the repository can change it.` : 'Not published yet. Right now every visitor can add data, but only in their own browser. Publish once to make the site read-only for everyone except signed-in admins.'}</p></div></header>
+    <div class="stack">
+      ${!pub ? '<div class="note warn"><span><b>This site is not locked yet.</b> It locks after the first publish and a page reload.</span></div>' : ''}
+      ${S.pubErr ? `<div class="note crit"><span><b>Last publish failed.</b> ${esc(S.pubErr)}</span></div>` : ''}
+      ${S.dirty && !S.pubBusy ? '<div class="note warn"><span><b>You have changes that visitors cannot see yet.</b> Press Publish now.</span></div>' : ''}
+      ${conn ? `<div class="rowflex"><span class="chip g">Connected to ${esc(S.ghRepo)}</span><button class="btn primary" data-act="publish" ${S.pubBusy ? 'disabled' : ''}>${S.pubBusy ? 'Publishing…' : 'Publish now'}</button>${pub ? '<button class="btn" data-act="admin-logout">Sign out</button>' : '<button class="btn" data-act="admin-logout">Disconnect</button>'}${pub && S.dirty ? '<button class="btn danger" data-act="discard-draft">Discard changes</button>' : ''}</div>
+        ${pub ? `<label class="rowflex" style="cursor:pointer"><input type="checkbox" id="autopub" data-autopub ${S.autoPub ? 'checked' : ''}> <span>Publish automatically a few seconds after each change</span></label>` : ''}
+        ${S.lastPubAt ? `<div class="sub">Last published from this browser: ${when(S.lastPubAt)}. GitHub Pages shows it to visitors about a minute later.</div>` : ''}`
+        : `<div><b>Connect GitHub to publish</b>${ghForm('conn-form', 'Connect')}</div>`}
+      <div class="rowflex"><button class="btn sm" data-act="download-bundle">Download soh-data.json (manual backup)</button><button class="btn sm" data-act="check-live">Check live site</button><span id="chk-msg" class="sub" role="status"></span></div>
+      <div class="note info"><span><b>How the protection works.</b> Visitors only read <b>soh-data.json</b> from your repository. Changing it needs a token with write access, which GitHub checks. Uploads, deletes and warehouse changes are hidden for visitors. Every publish is saved in the repository's history, so you can restore an older version from GitHub.</span></div>
+    </div></div>`;
+  const bin = S.trash.length ? `<div class="card"><header><div><h3>Recycle bin</h3><p>Deleted snapshots are kept here on this device.</p></div></header><div class="tablewrap"><table><thead><tr><th class="nosort">Date</th><th class="nosort">File</th><th class="nosort r">Stock</th><th class="nosort">Actions</th></tr></thead><tbody>${S.trash.map(s => `<tr><td>${dateLabel(s.date)}</td><td class="wrap">${esc(s.filename)}</td><td class="r">${fmt(s.meta?.sel ?? summarize(s.rows).sel)}</td><td><div class="rowflex"><button class="btn sm" data-act="restore-snap" data-id="${s.id}">Restore</button><button class="btn sm danger" data-act="purge-snap" data-id="${s.id}">Delete forever</button></div></td></tr>`).join('')}</tbody></table></div></div>` : '';
+  const log = `<div class="card"><header><div><h3>Activity log</h3><p>Recent changes made in this browser.</p></div></header>${S.log.length ? `<div class="stack">${S.log.slice(0, 12).map(l => `<div class="rowflex"><span class="sub num" style="min-width:150px">${when(l.t)}</span><span>${esc(l.msg)}</span></div>`).join('')}</div>` : '<div class="empty">No activity yet.</div>'}</div>`;
+  return publishCard + bin + log;
+}
+function modeChips() {
+  if (S.mode !== 'published') return '';
+  if (!S.admin) return '<span class="chip">Read-only</span>';
+  const st = S.pubBusy ? '<span class="chip y">Publishing…</span>' : S.pubErr ? '<a class="btn sm" href="#upload">Publish failed</a>' : S.dirty ? '<a class="btn sm" href="#upload">Not published yet</a>' : '<span class="chip g">Admin · published</span>';
+  return st + '<button class="btn sm" data-act="admin-logout">Sign out</button>';
+}
+
+/* handlers */
+document.addEventListener('submit', async e => {
+  const id = e.target.id; if (id !== 'adm-form' && id !== 'conn-form') return; e.preventDefault();
+  const m = $('#' + id + '-msg'); m.textContent = 'Checking…';
+  const err = await ghConnect($('#' + id + '-repo').value, $('#' + id + '-tok').value);
+  if (err) m.textContent = err; else { toast('Signed in'); render(); }
+});
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]'); if (!b) return; const a = b.dataset.act, id = b.dataset.id;
+  if (a === 'check-live') {
+    const m = $('#chk-msg'); m.textContent = 'Checking…';
+    try { const r = await fetch('soh-data.json?t=' + Date.now(), { cache: 'no-store' });
+      if (!r.ok) m.textContent = `Not found (HTTP ${r.status}). Put soh-data.json in the same folder as index.html, with exactly that name, then wait a minute.`;
+      else { const j = await r.json(); m.textContent = j && j.app === 'soh-tracker' ? `Found, published ${new Date(j.publishedAt).toLocaleString('en-IN')} with ${(j.snaps || []).length} snapshots. ${S.mode === 'published' ? 'This page is locked.' : 'Reload this page to switch to locked mode.'}` : 'A file with that name exists but it is not a data file from this tracker. Download it again.'; } }
+    catch (e) { m.textContent = 'Could not read it (' + e.message + '). Download soh-data.json again and replace the file.'; }
+  }
+  else if (a === 'admin-logout') adminLogout();
+  else if (a === 'publish') await publishNow('manual');
+  else if (a === 'download-bundle' && canEdit()) { const bundle = { app: 'soh-tracker', v: 2, publishedAt: Date.now(), adminHash: null, ...bundleBody() }; await saveFile('soh-data.json', JSON.stringify(bundle)); }
+  else if (a === 'discard-draft' && canEdit()) { if (!armed(b, 'Confirm discard?')) return; await Store.put('kv', null, 'draft'); loadBase(); logAct('Discarded unpublished changes'); render(); }
+  else if (a === 'restore-snap' && canEdit()) { const s = S.trash.find(x => x.id === id); if (!s) return; S.trash = S.trash.filter(x => x.id !== id); S.snaps.push(s); await Store.put('snaps', s); await Store.put('kv', S.trash, 'trash'); logAct(`Restored snapshot ${s.date}`); toast('Snapshot restored'); render(); }
+  else if (a === 'purge-snap' && canEdit()) { if (!armed(b, 'Confirm delete forever?')) return; S.trash = S.trash.filter(x => x.id !== id); await Store.put('kv', S.trash, 'trash'); render(); }
+});
+document.addEventListener('change', e => { const t = e.target; if (t.hasAttribute('data-autopub')) { S.autoPub = t.checked; Store.put('kv', S.autoPub, 'autopub'); if (S.autoPub && S.dirty) schedAuto(); render(); } if (t.dataset.ack === 'inv') { if (S.up.inv) S.up.inv.ack = t.checked; render(); } });
+
+/* boot */
+async function boot() {
+  await Store.open();
+  let bundle = null;
+  try { const r = await fetch('soh-data.json?t=' + Date.now(), { cache: 'no-store' }); if (r.ok) { const j = await r.json(); if (j && j.app === 'soh-tracker') bundle = j; } } catch (e) { }
+  try {
+    try { const g = JSON.parse(sessionStorage.getItem('soh-gh') || 'null'); if (g && g.token) { S.ghToken = g.token; S.ghRepo = g.repo; } } catch (e) { }
+    S.autoPub = (await Store.getKv('autopub')) !== false;
+    S.trash = (await Store.getKv('trash')) || []; S.log = (await Store.getKv('log')) || [];
+    if (bundle) {
+      S.mode = 'published'; S.published = bundle; loadBase(); S.lastPubStr = JSON.stringify(bundleBody());
+      if (S.ghToken) { S.admin = true; await tryDraft(); }
+    } else {
+      S.snaps = await Store.all('snaps'); S.sales = await Store.all('sales'); 
+      const mp = await Store.getKv('skumap'); if (mp && mp.rows) S.map = mp;
+      const st = await Store.getKv('settings'); S.settings.whStatus = {};
+      if (st) S.settings = { ...DEFAULTS, ...st, overrides: st.overrides || {}, whStatus: { ...(st.whStatus || {}) } };
+      if (!S.snaps.length && !(await Store.getKv('seeded')) && typeof SAMPLE !== 'undefined') {
+        const rows = SAMPLE.map(a => ({ id: String(a[0]), nm: a[1], br: a[2], upc: a[3] || '', uom: a[4] || '', wid: String(a[5]), wn: a[6], cat: catOf(a[1]), sel: a[7], inc: a[8], uns: a[9], dmg: a[10], lost: a[11], exp: a[12], nex: a[13], s7: a[14], s15: a[15], s30: a[16] }));
+        const snap = { id: uid(), date: '2026-11-08', uploadedAt: Date.parse('2026-11-08T03:26:47+05:30'), filename: 'InventoryData_46.xlsx', hash: rowsHash(rows), rows, meta: summarize(rows) };
+        S.snaps.push(snap); await Store.put('snaps', snap); await Store.put('kv', true, 'seeded');
+      }
+    }
+  } catch (e) { console.error(e); }
+  buildMapIdx(); buildSalesIdx(); route();
+}
+boot();
+
+</script>
+</body>
+</html>
