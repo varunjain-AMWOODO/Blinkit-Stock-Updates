@@ -273,6 +273,7 @@ function findHeader(sheets, fields, required) {
 function parseDateCell(v) {
   if (v instanceof Date && !isNaN(v)) { return { d: `${v.getUTCFullYear()}-${pad(v.getUTCMonth() + 1)}-${pad(v.getUTCDate())}`, dm: false }; }
   if (v == null || v === '') return null;
+  if (typeof v === 'number' && v > 20000 && v < 80000) { const t = new Date(Math.round((v - 25569) * 864e5)); return { d: `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`, dm: false }; }
   const s = String(v).trim(); let m;
   if ((m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/))) return ok(+m[1], +m[2], +m[3], false);
   if ((m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/))) return ok(+m[3], +m[2], +m[1], true);
@@ -1178,236 +1179,372 @@ document.addEventListener('change', e => {
 });
 document.addEventListener('input', e => { const t = e.target; if (t.dataset.w === 'q') { WF().q = t.value; rerenderSoon(); } });
 
-/* ---------- ORDER SALES REPORTS: daily sales + top state ---------- */
-/* Stored aggregated, not row by row:  sd = [date, state, orders, units, revenue]   si = [date, state, itemId, units, revenue]  */
-const emptyOrd = () => ({ sd: [], si: [], items: {}, files: [] });
+/* ---------- ORDER SALES REPORTS: daily sales, states, products, cities, insights ---------- */
+/* Stored aggregated (not row by row):
+   sd = [date, state, orders, units, revenue, mrpValue, multiItemOrders]
+   sc = [date, state, city, orders, units, revenue]
+   si = [date, state, itemId, units, revenue, orders]
+   items = { itemId: [name, brand, category] } */
+const emptyOrd = () => ({ sd: [], sc: [], si: [], items: {}, files: [] });
+const normOrd = o => o && Array.isArray(o.sd) ? { sd: o.sd, sc: o.sc || [], si: o.si || [], items: o.items || {}, files: o.files || [] } : emptyOrd();
 S.ord = emptyOrd();
+
 const ORD_FIELDS = {
-  oid: ['orderid', 'orderno', 'ordernumber', 'orderref'],
-  date: ['orderdate', 'saledate', 'date', 'ordereddate', 'deliverydate'],
-  item: ['itemid', 'productid', 'skuid', 'sku'],
-  nm: ['productname', 'itemname', 'name'], br: ['brandname', 'brand'],
-  state: ['customerstate', 'deliverystate', 'shippingstate', 'state'], sstate: ['supplystate', 'warehousestate'],
-  status: ['orderstatus', 'status'],
-  qty: ['quantity', 'qty', 'unitssold', 'units'],
-  amt: ['totalgrossbillamount', 'grossbillamount', 'grossamount', 'totalbillamount', 'gmv', 'netamount', 'totalamount']
+  oid: ['orderid', 'orderno', 'ordernumber', 'orderref', 'orderidnumber', 'invoiceno', 'invoicenumber'],
+  date: ['orderdate', 'saledate', 'date', 'ordereddate', 'deliverydate', 'invoicedate', 'salesdate', 'orderplaceddate'],
+  item: ['itemid', 'productid', 'skuid', 'sku', 'itemcode', 'skucode'],
+  nm: ['productname', 'itemname', 'skuname', 'name', 'product', 'item', 'description'],
+  br: ['brandname', 'brand'],
+  cat: ['mappingonconsumerappl0l1l2', 'category', 'productcategory', 'categoryname', 'l0category', 'l1category'],
+  bcat: ['businesscategory'],
+  state: ['customerstate', 'deliverystate', 'shippingstate', 'state', 'statename', 'customerstatename'],
+  sstate: ['supplystate', 'warehousestate', 'fulfilmentstate'],
+  city: ['customercity', 'deliverycity', 'shippingcity', 'city', 'cityname'],
+  scity: ['supplycity', 'warehousecity'],
+  status: ['orderstatus', 'status', 'deliverystatus'],
+  qty: ['quantity', 'qty', 'unitssold', 'units', 'unitsordered', 'orderedquantity'],
+  mrp: ['mrprs', 'mrp', 'listprice', 'maxretailprice'],
+  price: ['sellingpricers', 'sellingprice', 'unitprice', 'price', 'saleprice', 'offerprice'],
+  amt: ['totalgrossbillamount', 'grossbillamount', 'grossamount', 'totalbillamount', 'gmv', 'netamount', 'totalamount', 'amount', 'linetotal', 'revenue', 'sales', 'salesamount']
 };
+const ORD_LABEL = { oid: 'Order Id', date: 'Order Date', item: 'Item Id', nm: 'Product Name', br: 'Brand Name', cat: 'Category', bcat: 'Business Category', state: 'Customer State', sstate: 'Supply State (backup for state)', city: 'Customer City', scity: 'Supply City', status: 'Order Status', qty: 'Quantity', mrp: 'MRP (Rs)', price: 'Selling Price (Rs)', amt: 'Total Gross Bill Amount' };
+const ORD_ORDER = ['date', 'oid', 'state', 'sstate', 'qty', 'amt', 'price', 'mrp', 'item', 'nm', 'br', 'cat', 'bcat', 'city', 'status'];
 const EXCL_STATUS = /cancel|return|refund|reject|fail|rto|undeliver/i;
 const inr = n => n == null || isNaN(n) ? '–' : '₹' + Math.round(n).toLocaleString('en-IN');
 const inrC = n => { if (n == null || isNaN(n)) return '–'; const a = Math.abs(n); return a >= 1e7 ? '₹' + (n / 1e7).toFixed(2) + ' Cr' : a >= 1e5 ? '₹' + (n / 1e5).toFixed(2) + ' L' : inr(n); };
 const pctTxt = n => n == null || !isFinite(n) ? '–' : (n >= 0 ? '+' : '') + (Math.round(n * 1000) / 10) + '%';
+const pct1 = n => n == null || !isFinite(n) ? '–' : fmt1(n * 100) + '%';
 const METRICS = { rev: ['Revenue'], o: ['Orders'], u: ['Units'] };
 const mFmt = (m, v) => m === 'rev' ? inr(v) : fmt(v);
 const mFmtC = (m, v) => m === 'rev' ? inrC(v) : fmt(v);
-const cleanState = s => String(s ?? '').replace(/\s+/g, ' ').trim();
+const cleanTxt = s => String(s ?? '').replace(/\s+/g, ' ').trim();
+const dShort = d => dateLabel(d).slice(0, -5);
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const dowOf = d => new Date(d + 'T00:00:00Z').getUTCDay();
+const catOfRaw = (cat, bcat) => { const c = cleanTxt(cat); if (c) return cleanTxt(c.split(/->|>|\//)[0]) || c; return cleanTxt(bcat) || 'Uncategorised'; };
 
-function parseOrders(sheets, filename) {
-  const res = { kind: 'orders', filename, issues: [], stats: {}, agg: null };
-  const found = findHeader(sheets, ORD_FIELDS, ['oid', 'date', 'qty', 'amt']);
-  if (!found) {
-    const looksInv = findHeader(sheets, INV_FIELDS, ['id', 'sel']);
-    res.fatal = looksInv ? 'This looks like an inventory (stock on hand) sheet, not a sales report. Upload it on the Upload page instead.' : 'Could not find the order columns. The report needs Order Id, Order Date, Quantity and Total Gross Bill Amount, plus Customer State (or Supply State).';
-    return res;
-  }
-  const { sheet, hi, map, header } = found;
-  if (map.state == null && map.sstate == null) { res.fatal = 'The report has no state column. Add Customer State (or Supply State) so sales can be ranked by state.'; return res; }
-  const stCol = map.state != null ? map.state : map.sstate, stName = header[stCol];
-  res.stateBasis = stName; res.map = Object.entries(map).map(([f, i]) => ({ field: f, header: header[i] })); res.sheetName = sheet.name;
+/* ---------- reading any layout ---------- */
+function locateOrders(sheets) {
+  let f = findHeader(sheets, ORD_FIELDS, ['date', 'qty']) || findHeader(sheets, ORD_FIELDS, ['oid', 'date']) || findHeader(sheets, ORD_FIELDS, ['date', 'amt']);
+  if (f) return { sheet: f.sheet, hi: f.hi, header: f.header, map: f.map };
+  const sh = [...sheets].sort((a, b) => b.rows.length - a.rows.length)[0];
+  if (!sh) return null;
+  for (let i = 0; i < Math.min(sh.rows.length, 20); i++) { const row = sh.rows[i]; if (row && row.filter(x => x != null && x !== '').length >= 3) return { sheet: sh, hi: i, header: row, map: mapColumns(row, ORD_FIELDS) }; }
+  return null;
+}
+function parseOrders(sheets, filename, override) {
+  const res = { kind: 'orders', filename, issues: [], stats: {}, agg: null, notes: [] };
+  const loc = locateOrders(sheets);
+  if (!loc) { res.fatal = 'The file has no readable table. Use .xlsx, .xls or .csv with a header row.'; return res; }
+  const sheet = override?.sheetName ? (sheets.find(s => s.name === override.sheetName) || loc.sheet) : loc.sheet, hi = override?.hi ?? loc.hi, header = sheet.rows[hi] || loc.header;
+  const map = override?.map ? { ...override.map } : { ...loc.map };
+  res.sheetName = sheet.name; res.header = header; res.hi = hi; res.map = map;
+  const stCol = map.state != null ? map.state : map.sstate;
+  const missing = [];
+  if (map.date == null) missing.push('date'); if (map.qty == null) missing.push('qty'); if (map.amt == null && map.price == null) missing.push('amt'); if (stCol == null) missing.push('state');
+  res.missing = missing;
+  if (missing.length) { res.needMap = true; res.fatal = `Some required columns were not found: ${missing.map(f => ORD_LABEL[f]).join(', ')}. Pick them below from your file's columns.`; return res; }
+  if (map.oid == null) res.notes.push('No Order Id column: each line is counted as its own order.');
+  if (map.amt == null) res.notes.push('No total amount column: revenue is Selling Price × Quantity.');
+  if (map.state == null) res.notes.push(`State is taken from "${header[stCol]}".`);
+  if (map.item == null) res.notes.push('No Item Id column: product rankings are not available.');
   const add = (sev, row, field, msg) => res.issues.push({ sev, row, field, msg });
-  const dayState = new Map(), itemAgg = new Map(), seen = new Set(), items = {};
-  let read = 0, valid = 0, errors = 0, warns = 0, excl = 0, dupl = 0, units = 0, rev = 0, minD = null, maxD = null, dm = false, fut = 0, noItem = 0; const orders = new Set(), exclStat = {};
+  const dayState = new Map(), cityAgg = new Map(), itemAgg = new Map(), ordMap = new Map(), seen = new Set(), items = {}, lines = [];
+  let read = 0, valid = 0, errors = 0, excl = 0, dupl = 0, units = 0, rev = 0, minD = null, maxD = null, dm = false, fut = 0, noItem = 0; const exclStat = {};
   for (let r = hi + 1; r < sheet.rows.length; r++) {
     const raw = sheet.rows[r]; if (!raw || raw.every(x => x == null || x === '')) continue;
     const xr = r + 1; read++; const g = f => map[f] != null ? raw[map[f]] : null; let bad = false;
-    const oid = String(g('oid') ?? '').trim(), pd = parseDateCell(g('date')), q = numFrom(g('qty')), a = numFrom(g('amt')), st = cleanState(raw[stCol]), item = String(g('item') ?? '').trim();
-    if (!oid) { add('error', xr, 'Order Id', 'Missing order id'); bad = true; }
-    if (!pd) { add('error', xr, 'Order Date', g('date') == null ? 'Missing date' : `Unreadable date "${g('date')}". Use YYYY-MM-DD or DD/MM/YYYY.`); bad = true; }
-    if (q == null) { add('error', xr, 'Quantity', g('qty') == null ? 'Missing quantity' : `Not a number: "${g('qty')}"`); bad = true; } else if (q < 0) { add('error', xr, 'Quantity', 'Negative quantity'); bad = true; }
-    if (a == null) { add('error', xr, 'Total Gross Bill Amount', g('amt') == null ? 'Missing amount' : `Not a number: "${g('amt')}"`); bad = true; } else if (a < 0) { add('error', xr, 'Total Gross Bill Amount', 'Negative amount'); bad = true; }
-    if (!st) { add('error', xr, stName, 'Missing state'); bad = true; }
+    const oid = String(g('oid') ?? '').trim() || 'row' + xr, pd = parseDateCell(g('date')), q = numFrom(g('qty')), pr = numFrom(g('price')), mrp = numFrom(g('mrp'));
+    let a = map.amt != null ? numFrom(g('amt')) : (pr != null && q != null ? pr * q : null);
+    const st = cleanTxt(raw[stCol]), item = cleanTxt(g('item')), city = cleanTxt(g('city'));
+    if (!pd) { add('error', xr, ORD_LABEL.date, g('date') == null ? 'Missing date' : `Unreadable date "${g('date')}". Use YYYY-MM-DD or DD/MM/YYYY.`); bad = true; }
+    if (q == null) { add('error', xr, ORD_LABEL.qty, g('qty') == null ? 'Missing quantity' : `Not a number: "${g('qty')}"`); bad = true; } else if (q < 0) { add('error', xr, ORD_LABEL.qty, 'Negative quantity'); bad = true; }
+    if (a == null) { add('error', xr, ORD_LABEL.amt, (map.amt != null ? g('amt') : g('price')) == null ? 'Missing amount' : `Not a number: "${map.amt != null ? g('amt') : g('price')}"`); bad = true; } else if (a < 0) { add('error', xr, ORD_LABEL.amt, 'Negative amount'); bad = true; }
+    if (!st) { add('error', xr, ORD_LABEL.state, 'Missing state'); bad = true; }
     if (bad) { errors++; continue; }
-    const status = String(g('status') ?? '').trim();
+    const status = cleanTxt(g('status'));
     if (status && EXCL_STATUS.test(status)) { excl++; exclStat[status] = (exclStat[status] || 0) + 1; continue; }
-    const key = oid + '|' + item + '|' + (g('nm') ?? '');
-    if (seen.has(key)) { dupl++; warns++; if (dupl <= 20) add('warn', xr, 'Order Id', `Duplicate line for order ${oid}${item ? ' / item ' + item : ''}. Skipped.`); continue; }
+    const nm = cleanTxt(g('nm')), key = oid + '|' + item + '|' + nm + '|' + pd.d;
+    if (seen.has(key)) { dupl++; if (dupl <= 20) add('warn', xr, ORD_LABEL.oid, `Duplicate line for order ${oid}${item ? ' / item ' + item : ''}. Skipped.`); continue; }
     seen.add(key);
-    if (pd.dm) dm = true; if (pd.d > todayStr()) fut++;
-    if (!item) noItem++;
-    const dk = pd.d + '\u0001' + st; let ds = dayState.get(dk); if (!ds) dayState.set(dk, ds = { d: pd.d, st, o: new Set(), u: 0, r: 0 });
-    ds.o.add(oid); ds.u += q; ds.r += a;
+    if (pd.dm) dm = true; if (pd.d > todayStr()) fut++; if (!item) noItem++;
+    const mrpV = mrp != null ? mrp * q : a;
+    const dk = pd.d + '\u0001' + st; let ds = dayState.get(dk); if (!ds) dayState.set(dk, ds = { d: pd.d, st, o: new Set(), u: 0, r: 0, m: 0 });
+    ds.o.add(oid); ds.u += q; ds.r += a; ds.m += mrpV;
+    const ok = pd.d + '|' + oid; let om = ordMap.get(ok); if (!om) ordMap.set(ok, om = { dk, items: new Set() }); om.items.add(item || nm || 'x' + xr);
+    const ck = dk + '\u0001' + (city || '—'); let ca = cityAgg.get(ck); if (!ca) cityAgg.set(ck, ca = { d: pd.d, st, c: city || '—', o: new Set(), u: 0, r: 0 }); ca.o.add(oid); ca.u += q; ca.r += a;
     if (item) {
-      const ik = dk + '\u0001' + item; let ia = itemAgg.get(ik); if (!ia) itemAgg.set(ik, ia = { d: pd.d, st, id: item, u: 0, r: 0 });
-      ia.u += q; ia.r += a; if (!items[item]) items[item] = [String(g('nm') ?? '').trim(), String(g('br') ?? '').trim()];
+      const ik = dk + '\u0001' + item; let ia = itemAgg.get(ik); if (!ia) itemAgg.set(ik, ia = { d: pd.d, st, id: item, u: 0, r: 0, o: new Set() });
+      ia.u += q; ia.r += a; ia.o.add(oid);
+      if (!items[item]) items[item] = [nm, cleanTxt(g('br')), catOfRaw(g('cat'), g('bcat'))];
     }
-    orders.add(pd.d + '|' + oid); valid++; units += q; rev += a; if (!minD || pd.d < minD) minD = pd.d; if (!maxD || pd.d > maxD) maxD = pd.d;
+    lines.push([oid, pd.d, item, nm, cleanTxt(g('br')), catOfRaw(g('cat'), g('bcat')), st, city, status, q, mrp ?? '', pr ?? (q ? Math.round(a / q * 100) / 100 : ''), a]);
+    valid++; units += q; rev += a; if (!minD || pd.d < minD) minD = pd.d; if (!maxD || pd.d > maxD) maxD = pd.d;
   }
   if (!read) { res.fatal = 'The sheet has a header but no data rows.'; return res; }
-  if (dupl > 20) add('warn', '', 'Order Id', `${dupl - 20} more duplicate lines were skipped.`);
-  if (dm) { warns++; add('warn', '', 'Order Date', 'Some dates were read as day/month/year. Check the date range below is right.'); }
-  if (fut) { warns++; add('warn', '', 'Order Date', `${fut} lines have a date in the future.`); }
-  if (noItem) { warns++; add('warn', '', 'Item Id', `${noItem} lines have no item id, so they count in state totals but not in best sellers.`); }
-  if (minD && maxD && dayNum(maxD) - dayNum(minD) > 400) { warns++; add('warn', '', 'Order Date', `The dates span ${Math.round((dayNum(maxD) - dayNum(minD)) / 30)} months. Check this is the right file.`); }
-  res.agg = { sd: [...dayState.values()].map(x => [x.d, x.st, x.o.size, x.u, Math.round(x.r * 100) / 100]), si: [...itemAgg.values()].map(x => [x.d, x.st, x.id, x.u, Math.round(x.r * 100) / 100]), items };
-  const dates = new Set(res.agg.sd.map(x => x[0])), states = new Set(res.agg.sd.map(x => x[1]));
-  res.stats = { read, valid, errors, warnings: res.issues.filter(i => i.sev === 'warn').length, excluded: excl, exclStat, dupl, orders: orders.size, units, rev, minD, maxD, days: dates.size, states: states.size };
-  if (!valid) res.fatal = 'No valid order lines were found, so nothing can be saved. Check the error list.';
+  if (dupl > 20) add('warn', '', ORD_LABEL.oid, `${dupl - 20} more duplicate lines were skipped.`);
+  if (dm) add('warn', '', ORD_LABEL.date, 'Some dates were read as day/month/year. Check the date range below is right.');
+  if (fut) add('warn', '', ORD_LABEL.date, `${fut} lines have a date in the future.`);
+  if (noItem && map.item != null) add('warn', '', ORD_LABEL.item, `${noItem} lines have no item id, so they count in state totals but not in product rankings.`);
+  if (minD && maxD && dayNum(maxD) - dayNum(minD) > 400) add('warn', '', ORD_LABEL.date, `The dates span ${Math.round((dayNum(maxD) - dayNum(minD)) / 30)} months. Check this is the right file.`);
+  const multi = new Map(); ordMap.forEach(o => { if (o.items.size > 1) multi.set(o.dk, (multi.get(o.dk) || 0) + 1); });
+  const R2 = x => Math.round(x * 100) / 100;
+  res.agg = {
+    sd: [...dayState.entries()].map(([k, x]) => [x.d, x.st, x.o.size, x.u, R2(x.r), R2(x.m), multi.get(k) || 0]),
+    sc: [...cityAgg.values()].map(x => [x.d, x.st, x.c, x.o.size, x.u, R2(x.r)]),
+    si: [...itemAgg.values()].map(x => [x.d, x.st, x.id, x.u, R2(x.r), x.o.size]), items
+  };
+  res.lines = lines;
+  const dates = new Set(res.agg.sd.map(x => x[0])), states = new Set(res.agg.sd.map(x => x[1])), orders = new Set(); ordMap.forEach((_, k) => orders.add(k));
+  res.stats = { read, valid, errors, warnings: res.issues.filter(i => i.sev === 'warn').length, excluded: excl, exclStat, dupl, orders: orders.size, units, rev, minD, maxD, days: dates.size, states: states.size, products: Object.keys(items).length };
+  if (!valid) res.fatal = 'No valid order lines were found, so nothing can be saved. Check the error list or adjust the columns below.';
   return res;
 }
 
-/* Decide, per date, whether the new file replaces what is stored. A day is only replaced when the file has at least as many orders. */
+/* Per date: replace stored figures only when the new file has at least as many orders. */
 function planOrders(agg) {
   const have = new Map(); S.ord.sd.forEach(r => have.set(r[0], (have.get(r[0]) || 0) + r[2]));
   const nu = new Map(); agg.sd.forEach(r => nu.set(r[0], (nu.get(r[0]) || 0) + r[2]));
   const add = [], rep = [], keep = [];
   [...nu.keys()].sort().forEach(d => { if (!have.has(d)) add.push(d); else if (nu.get(d) >= have.get(d)) rep.push(d); else keep.push({ d, old: have.get(d), nw: nu.get(d) }); });
-  return { add, rep, keep, nu, have };
+  return { add, rep, keep };
 }
 async function saveOrders(p) {
-  const pl = planOrders(p.agg), skip = new Set(pl.keep.map(k => k.d)), drop = new Set(pl.rep);
-  S.ord.sd = S.ord.sd.filter(r => !drop.has(r[0])).concat(p.agg.sd.filter(r => !skip.has(r[0])));
-  S.ord.si = S.ord.si.filter(r => !drop.has(r[0])).concat(p.agg.si.filter(r => !skip.has(r[0])));
+  const pl = planOrders(p.agg), skip = new Set(pl.keep.map(k => k.d)), drop = new Set(pl.rep), ok = r => !skip.has(r[0]);
+  for (const k of ['sd', 'sc', 'si']) S.ord[k] = S.ord[k].filter(r => !drop.has(r[0])).concat(p.agg[k].filter(ok));
   Object.assign(S.ord.items, p.agg.items);
-  const used = p.agg.sd.filter(r => !skip.has(r[0]));
+  const used = p.agg.sd.filter(ok);
   S.ord.files.push({ id: uid(), name: p.filename, at: Date.now(), minD: p.stats.minD, maxD: p.stats.maxD, orders: used.reduce((s, r) => s + r[2], 0), rev: used.reduce((s, r) => s + r[4], 0), added: pl.add.length, replaced: pl.rep.length, kept: pl.keep.length });
   S.ord.sd.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
   await Store.put('kv', S.ord, 'orders'); logAct(`Saved sales report ${p.filename}: ${pl.add.length} new days, ${pl.rep.length} replaced, ${pl.keep.length} kept`);
   return pl;
 }
+const ORD_TEMPLATE_HEAD = ['Order Id', 'Order Date', 'Item Id', 'Product Name', 'Brand Name', 'Category', 'Customer State', 'Customer City', 'Order Status', 'Quantity', 'MRP (Rs)', 'Selling Price (Rs)', 'Total Gross Bill Amount'];
 
 /* ---------- filters and calculations ---------- */
-const OF = () => S.ui.of || (S.ui.of = { metric: 'rev', state: '', from: '', to: '' });
+const OF = () => S.ui.of || (S.ui.of = { metric: 'rev', state: '', from: '', to: '', preset: 'all' });
 const ordDates = () => [...new Set(S.ord.sd.map(r => r[0]))].sort();
 function ordCalc() {
-  const f = OF(), inR = d => (!f.from || d >= f.from) && (!f.to || d <= f.to);
-  const sd = S.ord.sd.filter(r => inR(r[0])), si = S.ord.si.filter(r => inR(r[0])), M = f.metric;
+  const f = OF(), inR = d => (!f.from || d >= f.from) && (!f.to || d <= f.to), M = f.metric, mk = M;
+  const sdAll = S.ord.sd.filter(r => inR(r[0])), isF = r => !f.state || r[1] === f.state;
+  const sd = sdAll.filter(isF), sc = S.ord.sc.filter(r => inR(r[0]) && isF(r)), siAll = S.ord.si.filter(r => inR(r[0])), si = siAll.filter(isF);
+  const dayList = [...new Set(sdAll.map(r => r[0]))].sort(), nDays = dayList.length;
+  // comparison windows
+  let win = null; if (nDays >= 14) win = { rec: dayList.slice(-7), pri: dayList.slice(-14, -7), kind: '7' }; else if (nDays >= 4) { const h = Math.floor(nDays / 2); win = { rec: dayList.slice(-h), pri: dayList.slice(-2 * h, -h), kind: 'h' }; }
+  const recSet = win ? new Set(win.rec) : null, priSet = win ? new Set(win.pri) : null;
+  // states (always across all states)
   const byState = new Map(), byDayAll = new Map(), byDay = new Map();
-  for (const [d, st, o, u, r] of sd) {
-    let s = byState.get(st); if (!s) byState.set(st, s = { st, o: 0, u: 0, rev: 0, top: 0 }); s.o += o; s.u += u; s.rev += r;
+  for (const [d, st, o, u, r, m, mu] of sdAll) {
+    let s = byState.get(st); if (!s) byState.set(st, s = { st, o: 0, u: 0, rev: 0, mrp: 0, multi: 0, top: 0, rec: 0, pri: 0, days: 0 });
+    s.o += o; s.u += u; s.rev += r; s.mrp += m || 0; s.multi += mu || 0; s.days++;
+    if (recSet?.has(d)) s.rec += r; if (priSet?.has(d)) s.pri += r;
     let da = byDayAll.get(d); if (!da) byDayAll.set(d, da = { d, best: null, bv: -1 }); const v = M === 'rev' ? r : M === 'o' ? o : u; if (v > da.bv) { da.bv = v; da.best = st; }
-    if (!f.state || f.state === st) { let x = byDay.get(d); if (!x) byDay.set(d, x = { d, o: 0, u: 0, rev: 0 }); x.o += o; x.u += u; x.rev += r; }
   }
-  const mk = M === 'rev' ? 'rev' : M === 'o' ? 'o' : 'u';
-  const states = [...byState.values()].sort((a, b) => b[mk] - a[mk]);
-  const days = [...byDay.values()].sort((a, b) => a.d < b.d ? -1 : 1);
+  for (const [d, st, o, u, r, m, mu] of sd) { let x = byDay.get(d); if (!x) byDay.set(d, x = { d, o: 0, u: 0, rev: 0, mrp: 0, multi: 0 }); x.o += o; x.u += u; x.rev += r; x.mrp += m || 0; x.multi += mu || 0; }
   byDayAll.forEach(da => { if (da.best) byState.get(da.best).top++; });
-  days.forEach(x => { x.aov = x.o ? x.rev / x.o : 0; x.top = byDayAll.get(x.d)?.best; });
-  const tot = states.reduce((a, s) => ({ o: a.o + s.o, u: a.u + s.u, rev: a.rev + s.rev }), { o: 0, u: 0, rev: 0 });
-  states.forEach((s, i) => { s.rank = i + 1; s.share = tot[mk] ? s[mk] / tot[mk] : 0; s.aov = s.o ? s.rev / s.o : 0; });
-  return { f, sd, si, states, days, tot, mk, M, nDays: byDayAll.size };
+  const states = [...byState.values()].sort((a, b) => b[mk === 'rev' ? 'rev' : mk] - a[mk === 'rev' ? 'rev' : mk]);
+  const totAll = states.reduce((a, s) => ({ o: a.o + s.o, u: a.u + s.u, rev: a.rev + s.rev }), { o: 0, u: 0, rev: 0 });
+  states.forEach((s, i) => { s.rank = i + 1; s.share = totAll[mk] ? s[mk] / totAll[mk] : 0; s.aov = s.o ? s.rev / s.o : 0; s.upo = s.o ? s.u / s.o : 0; s.perDay = s.days ? s.rev / s.days : 0; s.growth = win && s.pri > 0 ? (s.rec - s.pri) / s.pri : null; s.disc = s.mrp > 0 ? 1 - s.rev / s.mrp : null; });
+  const days = [...byDay.values()].sort((a, b) => a.d < b.d ? -1 : 1);
+  days.forEach((d, i) => { d.aov = d.o ? d.rev / d.o : 0; d.top = byDayAll.get(d.d)?.best; d.chg = i && days[i - 1].rev ? (d.rev - days[i - 1].rev) / days[i - 1].rev : null; const w = days.slice(Math.max(0, i - 6), i + 1); d.ma = w.reduce((s, x) => s + x.rev, 0) / w.length; });
+  const tot = days.reduce((a, d) => ({ o: a.o + d.o, u: a.u + d.u, rev: a.rev + d.rev, mrp: a.mrp + d.mrp, multi: a.multi + d.multi }), { o: 0, u: 0, rev: 0, mrp: 0, multi: 0 });
+  // products
+  const pm = new Map(), pState = new Map();
+  for (const [d, st, id, u, r, o] of siAll) { let m = pState.get(id); if (!m) pState.set(id, m = new Map()); m.set(st, (m.get(st) || 0) + r); }
+  for (const [d, st, id, u, r, o] of si) { let p = pm.get(id); if (!p) { const it = S.ord.items[id] || []; pm.set(id, p = { id, nm: it[0] || 'Item ' + id, br: it[1] || '', cat: it[2] || '', u: 0, rev: 0, o: 0, rec: 0, pri: 0 }); } p.u += u; p.rev += r; p.o += (o || 0); if (recSet?.has(d)) p.rec += r; if (priSet?.has(d)) p.pri += r; }
+  const products = [...pm.values()].sort((a, b) => b[mk] - a[mk]); const ptot = products.reduce((a, p) => ({ u: a.u + p.u, rev: a.rev + p.rev, o: a.o + p.o }), { u: 0, rev: 0, o: 0 });
+  products.forEach((p, i) => { p.rank = i + 1; p.share = ptot[mk] ? p[mk] / ptot[mk] : 0; p.asp = p.u ? p.rev / p.u : 0; const m = pState.get(p.id); let bs = null, bv = -1; m?.forEach((v, k) => { if (v > bv) { bv = v; bs = k; } }); p.topState = bs; p.growth = win && p.pri > 0 ? (p.rec - p.pri) / p.pri : null; });
+  // categories
+  const cm = new Map(); products.forEach(p => { const k = p.cat || 'Uncategorised'; let c = cm.get(k); if (!c) cm.set(k, c = { cat: k, u: 0, rev: 0, o: 0, n: 0 }); c.u += p.u; c.rev += p.rev; c.o += p.o; c.n++; });
+  const cats = [...cm.values()].sort((a, b) => b[mk] - a[mk]); cats.forEach(c => { c.share = ptot[mk] ? c[mk] / ptot[mk] : 0; });
+  // cities
+  const cym = new Map(); for (const [d, st, c, o, u, r] of sc) { const k = st + '\u0001' + c; let x = cym.get(k); if (!x) cym.set(k, x = { city: c, st, o: 0, u: 0, rev: 0 }); x.o += o; x.u += u; x.rev += r; }
+  const cities = [...cym.values()].sort((a, b) => b[mk] - a[mk]); const ctot = cities.reduce((s, x) => s + x[mk], 0); cities.forEach((x, i) => { x.rank = i + 1; x.share = ctot ? x[mk] / ctot : 0; x.aov = x.o ? x.rev / x.o : 0; });
+  // weekday
+  const wd = Array.from({ length: 7 }, (_, i) => ({ i, rev: 0, n: 0 })); days.forEach(d => { const w = wd[dowOf(d.d)]; w.rev += d.rev; w.n++; }); wd.forEach(w => { w.avg = w.n ? w.rev / w.n : 0; });
+  const c = { f, M, mk, sd, states, days, tot, totAll, products, ptot, cats, cities, wd, win, nDays, dayList, byDayAll };
+  c.insights = ordInsights(c);
+  return c;
+}
+function ordInsights(c) {
+  const out = [], { states, days, tot, products, cats, win, M } = c, f = c.f, mname = METRICS[M][0].toLowerCase();
+  if (!states.length || !days.length) return out;
+  const top = states[0], sec = states[1], top3 = states.slice(0, 3), t3 = top3.reduce((s, x) => s + x.share, 0);
+  out.push(['g', `<b>${esc(top.st)}</b> is the top-performing state with ${mFmtC(M, top[c.mk])} (${pct1(top.share)} of ${mname})${sec ? `, ${mFmtC(M, top[c.mk] - sec[c.mk])} ahead of ${esc(sec.st)}` : ''}. It led on ${top.top} of ${c.nDays} days.`]);
+  if (top3.length === 3) out.push([t3 > .5 ? 'y' : 'b', `The top 3 states (${top3.map(x => esc(x.st)).join(', ')}) bring ${pct1(t3)} of ${mname}.${t3 > .5 ? ' Sales depend heavily on a few states.' : ' Sales are fairly spread out.'}`]);
+  if (win) {
+    const rs = days.length ? 0 : 0; const rec = c.sd.filter(r => win.rec.includes(r[0])).reduce((s, r) => s + r[4], 0), pri = c.sd.filter(r => win.pri.includes(r[0])).reduce((s, r) => s + r[4], 0), ch = pri ? (rec - pri) / pri : null;
+    if (ch != null) out.push([ch >= 0 ? 'g' : 'r', `${win.kind === '7' ? 'Last 7 days' : 'The later half'} (${dShort(win.rec[0])} – ${dShort(win.rec[win.rec.length - 1])}) brought ${inrC(rec)}, <b>${pctTxt(ch)}</b> versus the ${win.kind === '7' ? 'previous 7 days' : 'earlier half'} (${inrC(pri)}).`]);
+    const mv = states.filter(s => s.pri >= Math.max(3000, c.totAll.rev * .004) && s.growth != null);
+    if (mv.length > 1) { const up = [...mv].sort((a, b) => b.growth - a.growth)[0], dn = [...mv].sort((a, b) => a.growth - b.growth)[0]; if (up.growth > .1) out.push(['g', `Fastest growing state: <b>${esc(up.st)}</b> (${pctTxt(up.growth)}).`]); if (dn.growth < -.1 && dn !== up) out.push(['r', `Biggest slowdown: <b>${esc(dn.st)}</b> (${pctTxt(dn.growth)}). Worth checking stock and availability there.`]); }
+  }
+  const bd = days.reduce((a, b) => b.rev > a.rev ? b : a), avg = tot.rev / days.length;
+  if (days.length > 3 && bd.rev > avg * 1.5) out.push(['y', `${dateLabel(bd.d)} was the best day at ${inrC(bd.rev)}, ${(bd.rev / avg).toFixed(1)}× the daily average. Check if a sale or campaign ran, since it lifts the averages.`]);
+  const wdv = c.wd.filter(w => w.n >= 2); if (wdv.length >= 5) { const b = [...wdv].sort((a, b) => b.avg - a.avg)[0], w = [...wdv].sort((a, b) => a.avg - b.avg)[0]; out.push(['b', `${DOW[b.i]} is the strongest weekday (${inrC(b.avg)} a day) and ${DOW[w.i]} the weakest (${inrC(w.avg)}).`]); }
+  if (products.length) { const p = products[0], p3 = products.slice(0, 3).reduce((s, x) => s + x.share, 0); out.push(['g', `Best-selling product: <b>${esc(p.nm)}</b> with ${mFmtC(M, p[c.mk])} (${pct1(p.share)}).${products.length > 3 ? ` The top 3 products make ${pct1(p3)} of ${mname}.` : ''}${p.topState ? ` It sells most in ${esc(p.topState)}.` : ''}`]); }
+  if (cats.length > 1) out.push(['b', `<b>${esc(cats[0].cat)}</b> is the leading category with ${pct1(cats[0].share)} of ${mname}.`]);
+  const aovS = states.filter(s => s.o >= 50).sort((a, b) => b.aov - a.aov)[0], aov = tot.o ? tot.rev / tot.o : 0; if (aovS && aov) out.push(['b', `Average order value is ${inr(aov)}. It is highest in <b>${esc(aovS.st)}</b> (${inr(aovS.aov)}).`]);
+  if (tot.mrp > 0) { const d = 1 - tot.rev / tot.mrp; out.push([d > .3 ? 'y' : 'b', `Customers paid on average <b>${pct1(d)}</b> below MRP.${d > .3 ? ' Deep discounts may be squeezing revenue per unit.' : ''}`]); }
+  if (tot.o > 100) { const m = tot.multi / tot.o; out.push([m < .1 ? 'y' : 'b', `${pct1(m)} of orders contain more than one product.${m < .1 ? ' Bundles and cross-selling could raise order value.' : ''}`]); }
+  const tail = states.filter(s => s.share < .01).length; if (tail >= 3) out.push(['b', `${tail} states each contribute under 1% of ${mname}. They are the long tail.`]);
+  return out;
 }
 
-/* ---------- view ---------- */
+/* ---------- upload card ---------- */
+function mapPickerHtml(p) {
+  const hdr = (p.header || []).map((h, i) => [i, cleanTxt(h)]).filter(x => x[1]);
+  return `<div class="grid cols2" style="gap:10px">${ORD_ORDER.map(f => `<div class="field"><label for="om-${f}">${ORD_LABEL[f]}${['date', 'qty'].includes(f) || (p.missing || []).includes(f) ? ' *' : ''}</label><select id="om-${f}" data-om="${f}"><option value="">– not in my file –</option>${hdr.map(([i, h]) => `<option value="${i}" ${p.map[f] === i ? 'selected' : ''}>${esc(h)}</option>`).join('')}</select></div>`).join('')}</div>`;
+}
 function ordUploadCard() {
   if (!canEdit()) return '';
   const u = S.up.ord, p = u?.parsed;
   let pv = '';
   if (u?.busy) pv = '<div class="note info">Reading file…</div>';
-  else if (p?.fatal) pv = `<div class="note crit"><span><b>${esc(u.file)}</b>: ${esc(p.fatal)}</span></div><div class="rowflex" style="margin-top:8px">${p.issues.length ? '<button class="btn sm" data-act="ord-issues">Download issue list (CSV)</button>' : ''}<button class="btn sm" data-act="ord-clear-up">Choose another file</button></div>`;
+  else if (p?.fatal) pv = `<div class="note ${p.needMap ? 'warn' : 'crit'}"><span><b>${esc(u.file)}</b>: ${esc(p.fatal)}</span></div>${p.needMap ? `<div style="margin-top:10px">${mapPickerHtml(p)}</div>` : ''}<div class="rowflex" style="margin-top:8px">${p.issues.length ? '<button class="btn sm" data-act="ord-issues">Download issue list (CSV)</button>' : ''}<button class="btn sm" data-act="ord-clear-up">Choose another file</button></div>`;
   else if (p) {
     const st = p.stats, pl = planOrders(p.agg), errs = p.issues.filter(i => i.sev === 'error'), lim = 60;
     pv = `<div class="stack">
-      <div class="rowflex"><b>${esc(u.file)}</b><span class="chip">${esc(p.sheetName || '')}</span><span class="chip b">State from: ${esc(p.stateBasis)}</span></div>
+      <div class="rowflex"><b>${esc(u.file)}</b><span class="chip">${esc(p.sheetName || '')}</span><span class="chip g">Converted to the template format</span></div>
+      ${p.notes.length ? `<div class="note info" style="flex-direction:column"><b>What was adjusted</b><ul style="margin:0;padding-left:18px">${p.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>` : ''}
       <div class="rowflex"><span class="chip">${fmt(st.read)} lines read</span><span class="chip g">${fmt(st.valid)} valid</span><span class="chip ${st.errors ? 'r' : ''}">${fmt(st.errors)} errors</span><span class="chip ${st.warnings ? 'y' : ''}">${fmt(st.warnings)} warnings</span>${st.excluded ? `<span class="chip y">${fmt(st.excluded)} cancelled or returned, left out</span>` : ''}</div>
-      <div class="grid kpis"><div class="kpi"><span class="l">Dates</span><span class="v num" style="font-size:20px">${dateLabel(st.minD).slice(0, -5)} – ${dateLabel(st.maxD).slice(0, -5)}</span><span class="s">${st.days} day${st.days > 1 ? 's' : ''}</span></div>
+      <div class="grid kpis"><div class="kpi"><span class="l">Dates</span><span class="v num" style="font-size:20px">${dShort(st.minD)} – ${dShort(st.maxD)}</span><span class="s">${st.days} day${st.days > 1 ? 's' : ''}</span></div>
       <div class="kpi"><span class="l">Orders</span><span class="v num">${fmt(st.orders)}</span><span class="s">${fmt(st.units)} units</span></div>
-      <div class="kpi"><span class="l">Revenue</span><span class="v num">${inrC(st.rev)}</span><span class="s">${st.states} states</span></div></div>
+      <div class="kpi"><span class="l">Revenue</span><span class="v num">${inrC(st.rev)}</span><span class="s">${st.states} states · ${fmt(st.products)} products</span></div></div>
       <div class="note ${pl.keep.length ? 'warn' : 'info'}" style="flex-direction:column"><b>What saving will do</b>
-        <span>${pl.add.length} new day${pl.add.length === 1 ? '' : 's'} added${pl.rep.length ? `, ${pl.rep.length} existing day${pl.rep.length === 1 ? '' : 's'} refreshed with this file (${pl.rep.slice(0, 4).map(d => dateLabel(d).slice(0, -5)).join(', ')}${pl.rep.length > 4 ? '…' : ''}). Totals are replaced, never added twice` : ''}.</span>
-        ${pl.keep.length ? `<span><b>${pl.keep.length} day${pl.keep.length === 1 ? '' : 's'} kept as stored</b> because this file has fewer orders than you already have: ${pl.keep.slice(0, 4).map(k => `${dateLabel(k.d).slice(0, -5)} (${fmt(k.nw)} vs ${fmt(k.old)})`).join(', ')}${pl.keep.length > 4 ? '…' : ''}.</span>` : ''}</div>
-      <details><summary class="sub" style="cursor:pointer">Columns detected</summary><div class="rowflex" style="margin-top:8px">${p.map.map(m => `<span class="chip">${esc(m.field)} ← ${esc(m.header)}</span>`).join('')}</div></details>
+        <span>${pl.add.length} new day${pl.add.length === 1 ? '' : 's'} added${pl.rep.length ? `, ${pl.rep.length} existing day${pl.rep.length === 1 ? '' : 's'} refreshed with this file (${pl.rep.slice(0, 4).map(dShort).join(', ')}${pl.rep.length > 4 ? '…' : ''}). Totals are replaced, never added twice` : ''}.</span>
+        ${pl.keep.length ? `<span><b>${pl.keep.length} day${pl.keep.length === 1 ? '' : 's'} kept as stored</b> because this file has fewer orders than you already have: ${pl.keep.slice(0, 4).map(k => `${dShort(k.d)} (${fmt(k.nw)} vs ${fmt(k.old)})`).join(', ')}${pl.keep.length > 4 ? '…' : ''}.</span>` : ''}</div>
+      <details><summary class="sub" style="cursor:pointer">Columns used (change if something is matched wrongly)</summary><div style="margin-top:10px">${mapPickerHtml(p)}</div></details>
       ${p.issues.length ? `<details ${errs.length ? 'open' : ''}><summary style="cursor:pointer;font-weight:600">Validation details (${p.issues.length})</summary><div class="tablewrap" style="margin-top:8px;max-height:240px;overflow:auto"><table><thead><tr><th class="nosort">Row</th><th class="nosort">Level</th><th class="nosort">Field</th><th class="nosort">Issue</th></tr></thead><tbody>${p.issues.slice(0, lim).map(i => `<tr><td>${i.row}</td><td><span class="chip ${i.sev === 'error' ? 'r' : 'y'}">${i.sev}</span></td><td>${esc(i.field)}</td><td class="wrap">${esc(i.msg)}</td></tr>`).join('')}</tbody></table></div><div class="rowflex" style="margin-top:8px"><span class="sub">${p.issues.length > lim ? `Showing first ${lim}. ` : ''}</span><button class="btn sm" data-act="ord-issues">Download issue list (CSV)</button></div></details>` : '<div class="note ok">No problems found.</div>'}
-      <div class="rowflex"><button class="btn primary" data-act="ord-save" ${pl.add.length + pl.rep.length ? '' : 'disabled'}>Save sales report${st.errors ? ` (skip ${fmt(st.errors)} lines with errors)` : ''}</button><button class="btn" data-act="ord-clear-up">Cancel</button></div></div>`;
+      <div class="rowflex"><button class="btn primary" data-act="ord-save" ${pl.add.length + pl.rep.length ? '' : 'disabled'}>Save sales report${st.errors ? ` (skip ${fmt(st.errors)} lines with errors)` : ''}</button><button class="btn" data-act="ord-converted">Download converted file</button><button class="btn" data-act="ord-clear-up">Cancel</button></div></div>`;
   }
   const files = S.ord.files.slice(-5).reverse();
-  return `<div class="card"><header><div><h3>Upload sales report</h3><p>Upload whenever you have a new report. Each day is stored once, so overlapping files never double count.</p></div></header><div class="stack">
+  return `<div class="card"><header><div><h3>Upload sales report</h3><p>Upload your sheet as it is. Columns are matched automatically and converted to the template. Each day is stored once, so overlapping files never double count.</p></div></header><div class="stack">
     ${dropHtml('ord', 'Upload sales report (Excel or CSV)')}
-    <div class="sub">Needs Order Id, Order Date, Quantity and Total Gross Bill Amount, plus Customer State. The Blinkit "Sales Summary" export works as is. Cancelled or returned orders are left out.</div>
+    <div class="sub">Works with the Blinkit "Sales Summary" export and with other layouts: it finds the header row, recognises common column names, and lets you pick columns by hand if needed. Cancelled or returned orders are left out. <button class="btn sm" data-act="ord-template">Download template (CSV)</button></div>
     <div id="pv-ord">${pv}</div>
-    ${files.length ? `<details><summary class="sub" style="cursor:pointer">Recent sales uploads (${S.ord.files.length})</summary><div class="tablewrap" style="margin-top:8px"><table><thead><tr><th class="nosort">File</th><th class="nosort">Dates</th><th class="nosort r">Orders</th><th class="nosort r">Revenue</th><th class="nosort">Uploaded</th></tr></thead><tbody>${files.map(x => `<tr><td class="wrap">${esc(x.name)}</td><td>${dateLabel(x.minD).slice(0, -5)} – ${dateLabel(x.maxD).slice(0, -5)}</td><td class="r">${fmt(x.orders)}</td><td class="r">${inr(x.rev)}</td><td>${new Date(x.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td></tr>`).join('')}</tbody></table></div>${S.ord.sd.length ? '<div class="rowflex" style="margin-top:8px"><button class="btn sm danger" data-act="ord-wipe">Erase all sales report data</button></div>' : ''}</details>` : ''}
+    ${files.length ? `<details><summary class="sub" style="cursor:pointer">Recent sales uploads (${S.ord.files.length})</summary><div class="tablewrap" style="margin-top:8px"><table><thead><tr><th class="nosort">File</th><th class="nosort">Dates</th><th class="nosort r">Orders</th><th class="nosort r">Revenue</th><th class="nosort">Uploaded</th></tr></thead><tbody>${files.map(x => `<tr><td class="wrap">${esc(x.name)}</td><td>${dShort(x.minD)} – ${dShort(x.maxD)}</td><td class="r">${fmt(x.orders)}</td><td class="r">${inr(x.rev)}</td><td>${new Date(x.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td></tr>`).join('')}</tbody></table></div>${S.ord.sd.length ? '<div class="rowflex" style="margin-top:8px"><button class="btn sm danger" data-act="ord-wipe">Erase all sales report data</button></div>' : ''}</details>` : ''}
   </div></div>`;
 }
+
+/* ---------- page ---------- */
 function viewSales() {
   const up = ordUploadCard();
-  if (!S.ord.sd.length) return `${up}<div class="card"><div class="empty"><b>No sales reports yet</b>${canEdit() ? 'Upload a sales report above to see daily sales and the top-performing state.' : 'Sales reports have not been published yet.'}</div></div>`;
-  const c = ordCalc(), f = c.f, M = c.M, top = c.states[0], second = c.states[1], dates = ordDates(), allStates = [...new Set(S.ord.sd.map(r => r[1]))].sort();
-  const label = METRICS[M][0].toLowerCase();
+  if (!S.ord.sd.length) return `${up}<div class="card"><div class="empty"><b>No sales reports yet</b>${canEdit() ? 'Upload a sales report above to see daily sales, top states, top products and insights.' : 'Sales reports have not been published yet.'}</div></div>`;
+  const c = ordCalc(), f = c.f, M = c.M, top = c.states[0], second = c.states[1], tp = c.products[0], dates = ordDates(), allStates = [...new Set(S.ord.sd.map(r => r[1]))].sort();
+  const label = METRICS[M][0].toLowerCase(), hasItems = c.products.length > 0, hasCity = c.cities.length > 0, hasMrp = c.tot.mrp > 0;
   const lastDay = c.days[c.days.length - 1], prevDay = c.days[c.days.length - 2], dRev = lastDay && prevDay && prevDay.rev ? (lastDay.rev - prevDay.rev) / prevDay.rev : null;
-  const best = c.days.length ? c.days.reduce((a, b) => b.rev > a.rev ? b : a) : null;
-  const ft = c.days.reduce((a, d) => ({ o: a.o + d.o, u: a.u + d.u, rev: a.rev + d.rev }), { o: 0, u: 0, rev: 0 });
-  const range = c.days.length ? `${dateLabel(c.days[0].d).slice(0, -5)} – ${dateLabel(lastDay.d).slice(0, -5)}` : 'no days in range';
+  const best = c.days.length ? c.days.reduce((a, b) => b.rev > a.rev ? b : a) : null, T = c.tot;
+  const range = c.days.length ? `${dShort(c.days[0].d)} – ${dShort(lastDay.d)}` : 'no days in range';
+  const recRev = c.win ? c.sd.filter(r => c.win.rec.includes(r[0])).reduce((s, r) => s + r[4], 0) : 0, priRev = c.win ? c.sd.filter(r => c.win.pri.includes(r[0])).reduce((s, r) => s + r[4], 0) : 0, gr = priRev ? (recRev - priRev) / priRev : null;
   const quick = (k, t) => `<button data-act="o-range" data-v="${k}" aria-pressed="${f.preset === k}">${t}</button>`;
-  const hero = top ? `<div class="card" style="border-color:var(--green);background:linear-gradient(135deg,var(--green-soft),var(--surface) 70%)"><div class="rowflex" style="justify-content:space-between;align-items:flex-start;gap:16px">
-      <div style="min-width:0"><span class="chip g">Top-performing state · by ${label}</span>
-        <div style="font-family:var(--font-head);font-size:34px;font-weight:800;line-height:1.1;margin:8px 0 4px">${esc(top.st)}</div>
-        <div class="sub">${fmt1(top.share * 100)}% of all ${label === 'revenue' ? 'revenue' : label} · top state on ${top.top} of ${c.nDays} days${second ? ` · ${mFmtC(M, top[c.mk] - second[c.mk])} ahead of ${esc(second.st)}` : ''}</div></div>
-      <div class="rowflex" style="gap:22px"><div><div class="sub">Revenue</div><b class="num" style="font-size:20px">${inrC(top.rev)}</b></div><div><div class="sub">Orders</div><b class="num" style="font-size:20px">${fmt(top.o)}</b></div><div><div class="sub">Units</div><b class="num" style="font-size:20px">${fmt(top.u)}</b></div><div><div class="sub">Avg order</div><b class="num" style="font-size:20px">${inr(top.aov)}</b></div></div></div>
+  const big = (l, v) => `<div><div class="sub">${l}</div><b class="num" style="font-size:19px">${v}</b></div>`;
+  const heroS = top ? `<div class="card" style="border-color:var(--green);background:linear-gradient(135deg,var(--green-soft),var(--surface) 75%)"><span class="chip g">Top-performing state · by ${label}</span>
+      <div style="font-family:var(--font-head);font-size:32px;font-weight:800;line-height:1.1;margin:8px 0 4px">${esc(top.st)}</div>
+      <div class="sub">${pct1(top.share)} of all ${label} · top state on ${top.top} of ${c.nDays} days${second ? ` · ${mFmtC(M, top[c.mk] - second[c.mk])} ahead of ${esc(second.st)}` : ''}</div>
+      <div class="rowflex" style="gap:20px;margin-top:12px">${big('Revenue', inrC(top.rev))}${big('Orders', fmt(top.o))}${big('Units', fmt(top.u))}${big('Avg order', inr(top.aov))}${top.growth != null ? big('Trend', pctTxt(top.growth)) : ''}</div>
       ${c.states.length > 1 ? `<div class="rowflex" style="margin-top:12px">${c.states.slice(1, 4).map(s => `<span class="chip">#${s.rank} ${esc(s.st)} · ${mFmtC(M, s[c.mk])}</span>`).join('')}</div>` : ''}</div>` : '';
+  const heroP = tp ? `<div class="card" style="border-color:var(--yellow);background:linear-gradient(135deg,color-mix(in srgb,var(--yellow) 22%,var(--surface)),var(--surface) 75%)"><span class="chip y">Top-selling product · by ${label}</span>
+      <div style="font-family:var(--font-head);font-size:22px;font-weight:800;line-height:1.2;margin:8px 0 4px">${esc(tp.nm)}</div>
+      <div class="sub">${esc(tp.br)}${tp.cat ? ' · ' + esc(tp.cat) : ''} · ${pct1(tp.share)} of all ${label}${tp.topState ? ` · sells most in ${esc(tp.topState)}` : ''}</div>
+      <div class="rowflex" style="gap:20px;margin-top:12px">${big('Revenue', inrC(tp.rev))}${big('Units', fmt(tp.u))}${big('Orders', fmt(tp.o))}${big('Avg price', inr(tp.asp))}</div>
+      ${c.products.length > 1 ? `<div class="rowflex" style="margin-top:12px">${c.products.slice(1, 3).map(s => `<span class="chip">#${s.rank} ${esc(s.nm.slice(0, 30))} · ${mFmtC(M, s[c.mk])}</span>`).join('')}</div>` : ''}</div>` : `<div class="card"><div class="empty"><b>No product data</b>This report had no Item Id column, so products are not ranked.</div></div>`;
+  c.days.forEach(d => { });
   const dayCols = [
     { h: 'Date', v: r => r.d, f: r => `<b>${dateLabel(r.d)}</b>` }, { h: 'Revenue', v: r => r.rev, f: r => inr(r.rev), r: 1 }, { h: 'Orders', v: r => r.o, f: r => fmt(r.o), r: 1 }, { h: 'Units', v: r => r.u, f: r => fmt(r.u), r: 1 }, { h: 'Avg order', v: r => r.aov, f: r => inr(r.aov), r: 1 },
     { h: 'vs previous day', v: r => r.chg ?? -Infinity, f: r => r.chg == null ? '–' : `<span class="chip ${r.chg >= 0 ? 'g' : 'r'}">${pctTxt(r.chg)}</span>`, r: 1 }, { h: 'Top state', v: r => r.top || '', f: r => r.top ? esc(r.top) : '–' }];
-  c.days.forEach((d, i) => { d.chg = i && c.days[i - 1].rev ? (d.rev - c.days[i - 1].rev) / c.days[i - 1].rev : null; });
   const stCols = [
-    { h: '#', v: r => r.rank, f: r => r.rank === 1 ? `<span class="chip g">1</span>` : r.rank }, { h: 'State', v: r => r.st, f: r => `<b>${esc(r.st)}</b>` }, { h: 'Revenue', v: r => r.rev, f: r => inr(r.rev), r: 1 }, { h: 'Share', v: r => r.share, f: r => `${fmt1(r.share * 100)}%`, r: 1 },
-    { h: 'Orders', v: r => r.o, f: r => fmt(r.o), r: 1 }, { h: 'Units', v: r => r.u, f: r => fmt(r.u), r: 1 }, { h: 'Avg order', v: r => r.aov, f: r => inr(r.aov), r: 1 }, { h: 'Days on top', v: r => r.top, f: r => r.top ? fmt(r.top) : '–', r: 1 }];
+    { h: '#', v: r => r.rank, f: r => r.rank === 1 ? `<span class="chip g">1</span>` : r.rank }, { h: 'State', v: r => r.st, f: r => `<b>${esc(r.st)}</b>` }, { h: 'Revenue', v: r => r.rev, f: r => inr(r.rev), r: 1 }, { h: 'Share', v: r => r.share, f: r => pct1(r.share), r: 1 },
+    { h: 'Orders', v: r => r.o, f: r => fmt(r.o), r: 1 }, { h: 'Units', v: r => r.u, f: r => fmt(r.u), r: 1 }, { h: 'Avg order', v: r => r.aov, f: r => inr(r.aov), r: 1 }, { h: 'Revenue / day', v: r => r.perDay, f: r => inr(r.perDay), r: 1 },
+    { h: c.win ? (c.win.kind === '7' ? 'Last 7d vs prior' : 'Trend') : 'Trend', v: r => r.growth ?? -Infinity, f: r => r.growth == null ? '–' : `<span class="chip ${r.growth >= 0 ? 'g' : 'r'}">${pctTxt(r.growth)}</span>`, r: 1 }, { h: 'Days on top', v: r => r.top, f: r => r.top ? fmt(r.top) : '–', r: 1 }];
+  const prCols = [
+    { h: '#', v: r => r.rank, f: r => r.rank === 1 ? `<span class="chip y">1</span>` : r.rank }, { h: 'Product', v: r => r.nm, f: r => `<b>${esc(r.nm)}</b><div class="sub">${esc(r.br)} · ${esc(r.id)}</div>`, wrap: 1 }, { h: 'Category', v: r => r.cat, f: r => esc(r.cat), wrap: 1 },
+    { h: 'Revenue', v: r => r.rev, f: r => inr(r.rev), r: 1 }, { h: 'Share', v: r => r.share, f: r => pct1(r.share), r: 1 }, { h: 'Units', v: r => r.u, f: r => fmt(r.u), r: 1 }, { h: 'Orders', v: r => r.o, f: r => fmt(r.o), r: 1 }, { h: 'Avg price', v: r => r.asp, f: r => inr(r.asp), r: 1 },
+    { h: 'Top state', v: r => r.topState || '', f: r => r.topState ? esc(r.topState) : '–' }, { h: 'Trend', v: r => r.growth ?? -Infinity, f: r => r.growth == null ? '–' : `<span class="chip ${r.growth >= 0 ? 'g' : 'r'}">${pctTxt(r.growth)}</span>`, r: 1 }];
+  const ciCols = [
+    { h: '#', v: r => r.rank, f: r => r.rank }, { h: 'City', v: r => r.city, f: r => `<b>${esc(r.city)}</b>` }, { h: 'State', v: r => r.st, f: r => esc(r.st) }, { h: 'Revenue', v: r => r.rev, f: r => inr(r.rev), r: 1 }, { h: 'Share', v: r => r.share, f: r => pct1(r.share), r: 1 },
+    { h: 'Orders', v: r => r.o, f: r => fmt(r.o), r: 1 }, { h: 'Units', v: r => r.u, f: r => fmt(r.u), r: 1 }, { h: 'Avg order', v: r => r.aov, f: r => inr(r.aov), r: 1 }];
   const dts = ts('o-day'); if (dts.sort == null) { dts.sort = 0; dts.dir = -1; }
-  const topItems = top ? bestItems(c.si, top.st, 8) : [];
+  const sec = (id, title, sub, body, exp) => `<div class="card"><header><div><h3>${title}</h3><p>${sub}</p></div>${exp ? `<button class="btn sm" data-act="${exp}">Download CSV</button>` : ''}</header>${body}</div>`;
+  const insHtml = c.insights.length ? `<div class="card"><header><div><h3>Key insights</h3><p>Worked out from the reports you uploaded, for ${range}${f.state ? ' · ' + esc(f.state) : ''}</p></div></header><div class="stack">${c.insights.map(([k, t]) => `<div class="note ${k === 'g' ? 'ok' : k === 'y' ? 'warn' : k === 'r' ? 'crit' : 'info'}"><span>${t}</span></div>`).join('')}</div></div>` : '';
   return `${up}
   <div class="card"><div class="filters" style="margin:0;align-items:end">
-    <div class="field"><label>Rank states by</label><div class="seg">${Object.entries(METRICS).map(([k, [t]]) => `<button data-act="o-metric" data-v="${k}" aria-pressed="${M === k}">${t}</button>`).join('')}</div></div>
+    <div class="field"><label>Rank by</label><div class="seg">${Object.entries(METRICS).map(([k, [t]]) => `<button data-act="o-metric" data-v="${k}" aria-pressed="${M === k}">${t}</button>`).join('')}</div></div>
     <div class="field"><label>Period</label><div class="seg">${quick('all', 'All days')}${quick('7', 'Last 7 days')}${quick('14', 'Last 14 days')}</div></div>
     <div class="field"><label for="o-from">From</label><input id="o-from" type="date" data-o="from" value="${esc(f.from)}" min="${dates[0]}" max="${dates[dates.length - 1]}"></div>
     <div class="field"><label for="o-to">To</label><input id="o-to" type="date" data-o="to" value="${esc(f.to)}" min="${dates[0]}" max="${dates[dates.length - 1]}"></div>
-    <div class="field"><label for="o-state">Daily view for</label><select id="o-state" data-o="state"><option value="">All states</option>${allStates.map(s => `<option ${f.state === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></div>
+    <div class="field"><label for="o-state">Focus on state</label><select id="o-state" data-o="state"><option value="">All states</option>${allStates.map(s => `<option ${f.state === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></div>
   </div></div>
-  ${hero || `<div class="note warn">No sales fall in the selected dates.</div>`}
+  ${top ? '' : '<div class="note warn">No sales fall in the selected dates.</div>'}
+  <div class="grid cols2">${heroS}${heroP}</div>
   <div class="grid kpis">
-    <div class="kpi"><span class="l">Revenue${f.state ? ' · ' + esc(f.state) : ''}</span><span class="v num">${inrC(ft.rev)}</span><span class="s">${range}</span></div>
-    <div class="kpi"><span class="l">Orders</span><span class="v num">${fmt(ft.o)}</span><span class="s">${fmt(ft.u)} units · avg order ${inr(ft.o ? ft.rev / ft.o : 0)}</span></div>
-    <div class="kpi"><span class="l">Latest day</span><span class="v num">${lastDay ? inrC(lastDay.rev) : '–'}</span><span class="s">${lastDay ? dateLabel(lastDay.d) : ''}${dRev != null ? ` · ${pctTxt(dRev)} vs previous day` : ''}</span></div>
-    <div class="kpi"><span class="l">Best day</span><span class="v num">${best ? inrC(best.rev) : '–'}</span><span class="s">${best ? dateLabel(best.d) + ' · ' + fmt(best.o) + ' orders' : ''}</span></div>
+    <div class="kpi"><span class="l">Revenue${f.state ? ' · ' + esc(f.state) : ''}</span><span class="v num">${inrC(T.rev)}</span><span class="s">${range}</span></div>
+    <div class="kpi"><span class="l">Orders</span><span class="v num">${fmt(T.o)}</span><span class="s">${fmt(T.u)} units</span></div>
+    <div class="kpi"><span class="l">Avg daily revenue</span><span class="v num">${inrC(c.days.length ? T.rev / c.days.length : 0)}</span><span class="s">${best ? 'best day ' + dShort(best.d) + ' · ' + inrC(best.rev) : ''}</span></div>
+    <div class="kpi"><span class="l">Latest day</span><span class="v num">${lastDay ? inrC(lastDay.rev) : '–'}</span><span class="s">${lastDay ? dShort(lastDay.d) : ''}${dRev != null ? ` · ${pctTxt(dRev)} vs previous day` : ''}</span></div>
+    <div class="kpi"><span class="l">Growth</span><span class="v num" style="${gr != null && gr < 0 ? 'color:var(--crit)' : ''}">${gr != null ? pctTxt(gr) : '–'}</span><span class="s">${c.win ? (c.win.kind === '7' ? 'last 7 days vs the 7 before' : 'later half vs earlier half') : 'needs 4+ days'}</span></div>
+    <div class="kpi"><span class="l">Avg order value</span><span class="v num">${inr(T.o ? T.rev / T.o : 0)}</span><span class="s">${fmt1(T.o ? T.u / T.o : 0)} units per order</span></div>
+    <div class="kpi"><span class="l">Discount vs MRP</span><span class="v num">${hasMrp ? pct1(1 - T.rev / T.mrp) : '–'}</span><span class="s">${hasMrp ? pct1(T.o ? T.multi / T.o : 0) + ' orders have 2+ products' : 'no MRP column'}</span></div>
+    <div class="kpi"><span class="l">Coverage</span><span class="v num">${c.states.length}</span><span class="s">states · ${fmt(c.cities.length)} cities · ${fmt(c.products.length)} products</span></div>
   </div>
+  ${insHtml}
   <div class="grid cols2">
-    ${chartCard('Daily sales', `${f.state ? esc(f.state) : 'All states'} · ${METRICS[M][0].toLowerCase()} per day`, 'ch-od')}
-    ${chartCard('Sales by state', `Top 12 states by ${label}. The leading state is highlighted`, 'ch-os')}
+    ${chartCard('Daily sales', `${f.state ? esc(f.state) : 'All states'} · ${label} per day${M === 'rev' ? ' with 7-day average' : ''}`, 'ch-od')}
+    ${chartCard('Sales by state', `Top 12 states by ${label}. The leader is highlighted`, 'ch-os')}
+    ${hasItems ? chartCard('Top products', `Top 10 by ${label}${f.state ? ' in ' + esc(f.state) : ''}`, 'ch-op') : ''}
+    ${hasItems ? chartCard('Sales by category', `Share of ${label}${f.state ? ' in ' + esc(f.state) : ''}`, 'ch-oc') : ''}
+    ${chartCard('Weekday pattern', 'Average revenue by day of week', 'ch-ow')}
+    ${hasCity ? chartCard('Top cities', `Top 10 by ${label}${f.state ? ' in ' + esc(f.state) : ''}`, 'ch-oy') : ''}
   </div>
-  <div class="card"><header><div><h3>Daily sales</h3><p>${f.state ? esc(f.state) : 'All states'} · tap a heading to sort</p></div><button class="btn sm" data-act="o-export-day">Download CSV</button></header>${tableHtml('o-day', dayCols, c.days, dts)}</div>
-  <div class="card"><header><div><h3>State ranking</h3><p>Ranked by ${label} for ${range}</p></div><button class="btn sm" data-act="o-export-st">Download CSV</button></header>${tableHtml('o-st', stCols, c.states, ts('o-st'))}</div>
-  ${topItems.length ? `<div class="card"><header><div><h3>Best sellers in ${esc(top.st)}</h3><p>Top products by ${M === 'u' ? 'units' : 'revenue'} in the selected dates</p></div></header><div class="tablewrap"><table><thead><tr><th class="nosort">#</th><th class="nosort">Product</th><th class="nosort">Item ID</th><th class="nosort r">Units</th><th class="nosort r">Revenue</th></tr></thead><tbody>${topItems.map((x, i) => `<tr><td>${i + 1}</td><td class="wrap"><b>${esc(x.nm || 'Item ' + x.id)}</b><div class="sub">${esc(x.br)}</div></td><td class="num">${esc(x.id)}</td><td class="r">${fmt(x.u)}</td><td class="r">${inr(x.r)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
-  <p class="sub">Revenue is the Total Gross Bill Amount of delivered orders. States come from the customer state in each report. ${fmt(S.ord.sd.reduce((s, r) => s + r[2], 0))} orders stored across ${dates.length} days.</p>`;
-}
-function bestItems(si, state, n) {
-  const m = new Map(); si.filter(r => r[1] === state).forEach(r => { let x = m.get(r[2]); if (!x) m.set(r[2], x = { id: r[2], nm: S.ord.items[r[2]]?.[0], br: S.ord.items[r[2]]?.[1] || '', u: 0, r: 0 }); x.u += r[3]; x.r += r[4]; });
-  return [...m.values()].sort((a, b) => OF().metric === 'u' ? b.u - a.u : b.r - a.r).slice(0, n);
+  ${sec('d', 'Daily sales', `${f.state ? esc(f.state) : 'All states'} · tap a heading to sort`, tableHtml('o-day', dayCols, c.days, dts), 'o-export-day')}
+  ${sec('s', 'State ranking', `Ranked by ${label} for ${range}`, tableHtml('o-st', stCols, c.states, ts('o-st')), 'o-export-st')}
+  ${hasItems ? sec('p', 'Product ranking', `Ranked by ${label}${f.state ? ' in ' + esc(f.state) : ''}. Trend compares the recent period with the one before`, tableHtml('o-pr', prCols, c.products, ts('o-pr')), 'o-export-pr') : ''}
+  ${hasCity ? sec('c', 'City ranking', `Ranked by ${label}${f.state ? ' in ' + esc(f.state) : ''}`, tableHtml('o-ci', ciCols, c.cities, ts('o-ci')), 'o-export-ci') : ''}
+  <p class="sub">Revenue is the Total Gross Bill Amount of delivered orders. States come from the customer state in each report. ${fmt(S.ord.sd.reduce((s, r) => s + r[2], 0))} orders stored across ${dates.length} days. Cancelled and returned orders are not counted.</p>`;
 }
 function chartsSales() {
-  if (!S.ord.sd.length || !$('#ch-od')) return; const c = ordCalc(), M = c.M, key = M === 'rev' ? 'rev' : M === 'o' ? 'o' : 'u';
-  drawChart('ch-od', { type: 'bar', data: { labels: c.days.map(d => dateLabel(d.d).slice(0, -5)), datasets: [{ label: METRICS[M][0], data: c.days.map(d => d[key]), backgroundColor: css('--chart1'), borderRadius: 3 }] }, options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: x => ' ' + mFmt(M, x.parsed.y) } } } } });
-  const rows = c.states.slice(0, 12); $('#ch-os').parentElement.style.height = Math.max(240, rows.length * 26 + 60) + 'px';
-  drawChart('ch-os', { type: 'bar', data: { labels: rows.map(s => s.st), datasets: [{ label: METRICS[M][0], data: rows.map(s => s[c.mk]), backgroundColor: rows.map((s, i) => i === 0 ? css('--chart2') : css('--chart1')), borderRadius: 3 }] }, options: { indexAxis: 'y', plugins: { legend: { display: false }, tooltip: { callbacks: { label: x => ' ' + mFmt(M, x.parsed.x) } } }, scales: { x: { grid: { color: css('--grid') }, beginAtZero: true }, y: { grid: { display: false } } } } });
+  if (!S.ord.sd.length || !$('#ch-od')) return; const c = ordCalc(), M = c.M, mk = c.mk, k1 = css('--chart1'), k2 = css('--chart2'), grid = css('--grid');
+  const hbar = (id, labels, data, hi, fmtF) => { const box = $('#' + id)?.parentElement; if (!box) return; box.style.height = Math.max(240, labels.length * 26 + 60) + 'px'; drawChart(id, { type: 'bar', data: { labels, datasets: [{ data, backgroundColor: data.map((_, i) => hi && i === 0 ? k2 : k1), borderRadius: 3 }] }, options: { indexAxis: 'y', plugins: { legend: { display: false }, tooltip: { callbacks: { label: x => ' ' + fmtF(x.parsed.x) } } }, scales: { x: { grid: { color: grid }, beginAtZero: true }, y: { grid: { display: false } } } } }); };
+  const dk = M === 'rev' ? 'rev' : M;
+  drawChart('ch-od', { type: 'bar', data: { labels: c.days.map(d => dShort(d.d)), datasets: [{ label: METRICS[M][0], data: c.days.map(d => d[dk]), backgroundColor: k1, borderRadius: 3, order: 2 }].concat(M === 'rev' ? [{ type: 'line', label: '7-day average', data: c.days.map(d => d.ma), borderColor: k2, backgroundColor: k2, borderWidth: 2, pointRadius: 0, tension: .3, order: 1 }] : []) }, options: { plugins: { legend: { display: M === 'rev', position: 'bottom' }, tooltip: { callbacks: { label: x => ` ${x.dataset.label}: ${mFmt(M, x.parsed.y)}` } } } } });
+  const st = c.states.slice(0, 12); hbar('ch-os', st.map(s => s.st), st.map(s => s[mk]), true, v => mFmt(M, v));
+  const pr = c.products.slice(0, 10); if (pr.length) hbar('ch-op', pr.map(p => p.nm.slice(0, 34)), pr.map(p => p[mk]), true, v => mFmt(M, v));
+  if ($('#ch-oc')) { const ct = c.cats.slice(0, 8); const pal = [k1, k2, css('--chart3'), css('--info'), css('--warn'), '#7a5cc7', '#2a9d8f', '#8a8f87']; drawChart('ch-oc', { type: 'doughnut', data: { labels: ct.map(x => x.cat), datasets: [{ data: ct.map(x => x[mk]), backgroundColor: ct.map((_, i) => pal[i % pal.length]), borderColor: css('--surface'), borderWidth: 2 }] }, options: { scales: {}, cutout: '58%', plugins: { legend: { position: 'right', labels: { boxWidth: 12 } }, tooltip: { callbacks: { label: x => ` ${x.label}: ${mFmt(M, x.parsed)}` } } } } }); }
+  const ord = [1, 2, 3, 4, 5, 6, 0], mx = Math.max(...c.wd.map(w => w.avg));
+  drawChart('ch-ow', { type: 'bar', data: { labels: ord.map(i => DOW[i]), datasets: [{ data: ord.map(i => c.wd[i].avg), backgroundColor: ord.map(i => c.wd[i].avg === mx && mx > 0 ? k2 : k1), borderRadius: 3 }] }, options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: x => ' ' + inr(x.parsed.y) + ' a day' } } } } });
+  const cy = c.cities.slice(0, 10); if (cy.length) hbar('ch-oy', cy.map(x => x.city), cy.map(x => x[mk]), true, v => mFmt(M, v));
 }
 
 /* ---------- actions ---------- */
-async function handleOrdFile(file) {
-  if (!file || !canEdit()) return;
-  S.up.ord = { file: file.name, busy: true }; render();
-  try { const sheets = await readFileRows(file); S.up.ord = { file: file.name, parsed: parseOrders(sheets, file.name) }; }
+async function readOrd(file, override) {
+  const keep = S.up.ord?.sheets && S.up.ord.file === file.name ? S.up.ord.sheets : null;
+  S.up.ord = { file: file.name, busy: !keep, sheets: keep, fileObj: file }; render();
+  try { const sheets = keep || await readFileRows(file); S.up.ord = { file: file.name, sheets, fileObj: file, parsed: parseOrders(sheets, file.name, override), override }; }
   catch (e) { S.up.ord = { file: file.name, parsed: { fatal: 'This file could not be read. Use .xlsx, .xls or .csv. (' + (e.message || e) + ')', issues: [], stats: {} } }; }
   render();
 }
 document.addEventListener('change', e => {
   const t = e.target;
-  if (t.dataset.file === 'ord') { handleOrdFile(t.files[0]); return; }
-  if (t.dataset.o) { const f = OF(); f[t.dataset.o] = t.value; if (t.dataset.o !== 'state') f.preset = ''; ts('o-day').page = 0; render(); }
+  if (t.dataset.file === 'ord') { if (canEdit() && t.files[0]) readOrd(t.files[0]); return; }
+  if (t.dataset.om) {
+    const u = S.up.ord; if (!u?.parsed || !canEdit()) return; const p = u.parsed, map = { ...p.map };
+    if (t.value === '') delete map[t.dataset.om]; else map[t.dataset.om] = +t.value;
+    S.up.ord = { ...u, parsed: parseOrders(u.sheets, u.file, { map, sheetName: p.sheetName, hi: p.hi }), override: { map, sheetName: p.sheetName, hi: p.hi } }; render(); return;
+  }
+  if (t.dataset.o) { const f = OF(); f[t.dataset.o] = t.value; if (t.dataset.o !== 'state') f.preset = ''; ['o-day', 'o-pr', 'o-ci'].forEach(k => ts(k).page = 0); render(); }
 });
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-act]'); if (!b || !/^(o-|ord-)/.test(b.dataset.act)) return; const a = b.dataset.act, v = b.dataset.v, f = OF();
   if (a === 'o-metric') { f.metric = v; render(); }
-  else if (a === 'o-range') { const ds = ordDates(); f.preset = v; if (v === 'all') { f.from = ''; f.to = ''; } else { const last = ds[ds.length - 1]; f.to = ''; f.from = ds[Math.max(0, ds.length - +v)] || ''; } ts('o-day').page = 0; render(); }
+  else if (a === 'o-range') { const ds = ordDates(); f.preset = v; if (v === 'all') { f.from = ''; f.to = ''; } else { f.to = ''; f.from = ds[Math.max(0, ds.length - +v)] || ''; } ['o-day', 'o-pr', 'o-ci'].forEach(k => ts(k).page = 0); render(); }
   else if (a === 'o-export-day') { const c = ordCalc(); await saveFile('daily-sales.csv', toCsv(['Date', 'Revenue', 'Orders', 'Units', 'Avg order value', 'Change vs previous day', 'Top state'], c.days.map(d => [d.d, Math.round(d.rev), d.o, d.u, Math.round(d.aov), d.chg == null ? '' : Math.round(d.chg * 1000) / 10 + '%', d.top || '']))); }
-  else if (a === 'o-export-st') { const c = ordCalc(); await saveFile('sales-by-state.csv', toCsv(['Rank', 'State', 'Revenue', 'Share', 'Orders', 'Units', 'Avg order value', 'Days on top'], c.states.map(s => [s.rank, s.st, Math.round(s.rev), Math.round(s.share * 1000) / 10 + '%', s.o, s.u, Math.round(s.aov), s.top]))); }
+  else if (a === 'o-export-st') { const c = ordCalc(); await saveFile('sales-by-state.csv', toCsv(['Rank', 'State', 'Revenue', 'Share', 'Orders', 'Units', 'Avg order value', 'Revenue per day', 'Trend', 'Days on top'], c.states.map(s => [s.rank, s.st, Math.round(s.rev), Math.round(s.share * 1000) / 10 + '%', s.o, s.u, Math.round(s.aov), Math.round(s.perDay), s.growth == null ? '' : Math.round(s.growth * 1000) / 10 + '%', s.top]))); }
+  else if (a === 'o-export-pr') { const c = ordCalc(); await saveFile('sales-by-product.csv', toCsv(['Rank', 'Item ID', 'Product', 'Brand', 'Category', 'Revenue', 'Share', 'Units', 'Orders', 'Avg price', 'Top state'], c.products.map(p => [p.rank, p.id, p.nm, p.br, p.cat, Math.round(p.rev), Math.round(p.share * 1000) / 10 + '%', p.u, p.o, Math.round(p.asp), p.topState || '']))); }
+  else if (a === 'o-export-ci') { const c = ordCalc(); await saveFile('sales-by-city.csv', toCsv(['Rank', 'City', 'State', 'Revenue', 'Share', 'Orders', 'Units', 'Avg order value'], c.cities.map(x => [x.rank, x.city, x.st, Math.round(x.rev), Math.round(x.share * 1000) / 10 + '%', x.o, x.u, Math.round(x.aov)]))); }
+  else if (a === 'ord-template') { await saveFile('sales-report-template.csv', toCsv(ORD_TEMPLATE_HEAD, [['4052731327', '2026-11-11', '10282442', 'Sample product', 'Brand', 'Personal Care', 'Karnataka', 'Bengaluru', 'DELIVERED', 1, 499, 229, 229]])); }
   else if (!canEdit()) { toast('Admin sign-in required'); }
   else if (a === 'ord-clear-up') { S.up.ord = null; render(); }
   else if (a === 'ord-issues') { const p = S.up.ord?.parsed; if (p) await saveFile('sales-validation-issues.csv', toCsv(['Row', 'Level', 'Field', 'Issue'], p.issues.map(i => [i.row, i.sev, i.field, i.msg]))); }
+  else if (a === 'ord-converted') { const p = S.up.ord?.parsed; if (p?.lines) await saveFile('sales-report-converted.csv', toCsv(ORD_TEMPLATE_HEAD, p.lines)); }
   else if (a === 'ord-save') { const p = S.up.ord?.parsed; if (!p || p.fatal) return; const pl = await saveOrders(p); S.up.ord = null; f.from = ''; f.to = ''; f.preset = 'all'; toast(`Saved: ${pl.add.length} new day${pl.add.length === 1 ? '' : 's'}${pl.rep.length ? `, ${pl.rep.length} refreshed` : ''}`); render(); }
   else if (a === 'ord-wipe') { if (!armed(b, 'Confirm erase sales data?')) return; S.ord = emptyOrd(); await Store.put('kv', S.ord, 'orders'); logAct('Erased all sales report data'); toast('Sales report data erased'); render(); }
 });
@@ -1534,7 +1671,7 @@ async function restore(file) {
     const j = JSON.parse(await file.text()); if (j.app !== 'soh-tracker') throw new Error('Not a backup from this dashboard');
     for (const s of j.snaps || []) { if (!snapById(s.id)) S.snaps.push(s); await Store.put('snaps', s); }
     for (const s of j.sales || []) { if (!S.sales.find(x => x.id === s.id)) S.sales.push(s); await Store.put('sales', s); }
-    if (j.ord && j.ord.sd) { S.ord = { sd: j.ord.sd, si: j.ord.si || [], items: j.ord.items || {}, files: j.ord.files || [] }; await Store.put('kv', S.ord, 'orders'); }
+    if (j.ord && j.ord.sd) { S.ord = normOrd(j.ord); await Store.put('kv', S.ord, 'orders'); }
     if (j.settings) { S.settings = { ...DEFAULTS, ...j.settings, whStatus: { ...(j.settings.whStatus || {}) } }; S.whVer++; metaCache.clear(); await Store.put('kv', S.settings, 'settings'); }
     buildSalesIdx(); toast(`Restored ${(j.snaps || []).length} snapshots`); render();
   } catch (e) { toast('Restore failed: ' + e.message); }
@@ -1637,14 +1774,14 @@ const schedAuto = debounce(() => publishNow('auto'), 3000);
 /* published data (read-only for visitors) */
 function loadBase() {
   const b = S.published;
-  S.snaps = (b.snaps || []).map(unpackSnap); S.sales = b.sales || []; S.map = b.map || null; S.ord = b.ord && b.ord.sd ? { sd: b.ord.sd, si: b.ord.si || [], items: b.ord.items || {}, files: b.ord.files || [] } : emptyOrd(); S.authUsers = [...(b.auth?.users || [])];
+  S.snaps = (b.snaps || []).map(unpackSnap); S.sales = b.sales || []; S.map = b.map || null; S.ord = normOrd(b.ord); S.authUsers = [...(b.auth?.users || [])];
   S.settings = { ...DEFAULTS, ...(b.settings || {}), overrides: { ...(b.settings?.overrides || {}) }, whStatus: { ...(b.settings?.whStatus || {}) }, includeShut: false };
   S.ui.snapId = null; S.dirty = false; S.whVer++; metaCache.clear(); buildMapIdx(); buildSalesIdx();
 }
 async function tryDraft() {
   const d = await Store.getKv('draft');
   if (d && d.base === S.published.publishedAt) {
-    S.snaps = d.snaps.map(unpackSnap); S.sales = d.sales || []; S.map = d.map || null; S.ord = d.ord && d.ord.sd ? d.ord : emptyOrd(); if (d.auth) S.authUsers = d.auth;
+    S.snaps = d.snaps.map(unpackSnap); S.sales = d.sales || []; S.map = d.map || null; S.ord = normOrd(d.ord); if (d.auth) S.authUsers = d.auth;
     S.settings = { ...DEFAULTS, ...d.settings, overrides: { ...(d.settings?.overrides || {}) }, whStatus: { ...(d.settings?.whStatus || {}) } };
     S.dirty = true; S.whVer++; metaCache.clear(); buildMapIdx(); buildSalesIdx();
   }
@@ -1774,7 +1911,7 @@ async function boot() {
       if (S.ghToken) { S.admin = true; await tryDraft(); }
     } else {
       S.snaps = await Store.all('snaps'); S.sales = await Store.all('sales'); S.authUsers = (await Store.getKv('authusers')) || []; 
-      const od = await Store.getKv('orders'); if (od && od.sd) S.ord = od;
+      const od = await Store.getKv('orders'); S.ord = normOrd(od);
       const mp = await Store.getKv('skumap'); if (mp && mp.rows) S.map = mp;
       const st = await Store.getKv('settings'); S.settings.whStatus = {};
       if (st) S.settings = { ...DEFAULTS, ...st, overrides: st.overrides || {}, whStatus: { ...(st.whStatus || {}) } };
