@@ -213,7 +213,7 @@ const Store = {
     });
   },
   async all(store) { if (!this.ok) return [...this.mem[store].values()]; return this.tx(store, 'readonly', s => s.getAll()); },
-  draftRoute(store, key) { return S.mode === 'published' && (store === 'snaps' || store === 'sales' || (store === 'kv' && (key === 'skumap' || key === 'settings'))); },
+  draftRoute(store, key) { return S.mode === 'published' && (store === 'snaps' || store === 'sales' || (store === 'kv' && (key === 'skumap' || key === 'settings' || key === 'orders'))); },
   async put(store, val, key) { if (this.draftRoute(store, key)) { if (S.admin) saveDraft(); return; } this.mem[store].set(store === 'kv' ? key : val.id, val); if (this.ok) { try { await this.tx(store, 'readwrite', s => store === 'kv' ? s.put(val, key) : s.put(val)); } catch (e) { this.ok = false; toast('Storage write failed. Data will not persist after refresh.'); } } },
   async del(store, id) { if (this.draftRoute(store)) { if (S.admin) saveDraft(); return; } this.mem[store].delete(id); if (this.ok) await this.tx(store, 'readwrite', s => s.delete(id)); },
   async clear(store) { if (this.draftRoute(store)) { if (S.admin) saveDraft(); return; } this.mem[store].clear(); if (this.ok) await this.tx(store, 'readwrite', s => s.clear()); },
@@ -344,6 +344,7 @@ function parseInventory(sheets, filename) {
 /* ---------- sales validation ---------- */
 function parseSales(sheets, filename) {
   const res = { kind: 'sales', filename, issues: [], rows: [], stats: {}, headerOk: false };
+  if (findHeader(sheets, { oid: ['orderid'], st: ['customerstate', 'supplystate'] }, ['oid', 'st'])) { res.fatal = 'This is an order sales report (it has Order Id and State columns). Upload it on the Sales page. This box is only for item-level demand data.'; return res; }
   let found = findHeader(sheets, SALES_FIELDS, ['id', 'date', 'units']), fmtKind = 'daily';
   if (!found) { found = findHeader(sheets, SALES_FIELDS, ['id', 's7']) || findHeader(sheets, SALES_FIELDS, ['id', 's30']) || findHeader(sheets, SALES_FIELDS, ['id', 's15']); fmtKind = 'period'; }
   if (!found) { res.fatal = 'Could not find sales columns. Provide either daily rows (Item ID, Date, Units sold) or period totals (Item ID, Last 7 days / Last 15 days / Last 30 days).'; return res; }
@@ -563,18 +564,19 @@ const ICON = {
   history: '<path d="M4 5v5h5M4.5 10A8 8 0 1 1 6 16"/><path d="M12 8v5l3 2"/>',
   compare: '<path d="M7 4L3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/>',
   warehouses: '<path d="M3 10l9-6 9 6v10H3zM9 20v-6h6v6"/>',
+  sales: '<path d="M3 17l6-6 4 4 8-8M15 7h6v6"/>',
   planning: '<path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/>',
   'top-sellers': '<path d="M12 3l2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 16.8 6.6 19.7l1.1-6.1L3.2 9.4l6.1-.8z"/>'
 };
-const TABS = [['dashboard', 'Dashboard'], ['top-sellers', 'Top sellers'], ['warehouses', 'Warehouses'], ['upload', 'Upload'], ['history', 'History'], ['compare', 'Compare'], ['planning', 'Planning']];
+const TABS = [['dashboard', 'Dashboard'], ['top-sellers', 'Top sellers'], ['sales', 'Sales'], ['warehouses', 'Warehouses'], ['upload', 'Upload'], ['history', 'History'], ['compare', 'Compare'], ['planning', 'Planning']];
 function renderNav() {
   $('#nav').innerHTML = TABS.filter(([k]) => k !== 'upload' || canEdit() || S.ui.tab === 'upload').map(([k, l]) => `<a href="#${k}" ${S.ui.tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[k]}</svg><span>${l}</span></a>`).join('');
   $('#railnote').textContent = S.mode === 'published' ? (S.admin ? 'Admin · edits are a draft until you publish.' : 'Read-only · showing published data.') : (Store.ok ? 'Saved in this browser (IndexedDB).' : 'Storage unavailable: data will be lost on refresh.');
 }
 function renderTop() {
-  const s = activeSnap(), t = { dashboard: 'Inventory dashboard', 'top-sellers': 'Top-selling SKUs', warehouses: 'Warehouse status', upload: 'Upload data', history: 'History by month and date', compare: 'Compare stock', planning: 'Replenishment planning' }[S.ui.tab];
+  const s = activeSnap(), t = { dashboard: 'Inventory dashboard', 'top-sellers': 'Top-selling SKUs', sales: 'Sales and top state', warehouses: 'Warehouse status', upload: 'Upload data', history: 'History by month and date', compare: 'Compare stock', planning: 'Replenishment planning' }[S.ui.tab];
   $('#topband').innerHTML = `<div><h1>${t}</h1><small>${s ? `Stock on hand as of ${dateLabel(s.date)} · uploaded ${new Date(s.uploadedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ${esc(s.filename)}` : 'No inventory uploaded yet'}</small></div>
-  <div class="rowflex">${shutCount() && S.ui.tab !== 'warehouses' ? `<button class="btn sm" data-act="toggle-shut" title="Toggle shutdown warehouses in the numbers">${shutCount()} shutdown · ${S.settings.includeShut ? 'included' : 'excluded'}</button>` : ''}${modeChips()}${canEdit() ? '<a class="btn primary" href="#upload">Upload today\'s sheet</a>' : ''}</div>`;
+  <div class="rowflex">${shutCount() && S.ui.tab !== 'warehouses' ? `<button class="btn sm" data-act="toggle-shut" title="Toggle shutdown warehouses in the numbers">${shutCount()} shutdown · ${S.settings.includeShut ? 'included' : 'excluded'}</button>` : ''}${themeSeg()}${modeChips()}${canEdit() ? '<a class="btn primary" href="#upload">Upload today\'s sheet</a>' : ''}</div>`;
 }
 
 /* ---------- charts ---------- */
@@ -746,6 +748,7 @@ function viewUpload() {
       ${S.sales.length ? `<div><b>Saved sales uploads</b><div class="stack" style="margin-top:6px">${S.sales.map(s => `<div class="rowflex"><span class="chip b">${s.fmt === 'daily' ? 'Daily' : 'Period'}</span><span>${esc(s.filename)}</span><span class="sub">${fmt(s.rows.length)} rows${s.fmt === 'daily' ? ` · ${dateLabel(s.minD)} to ${dateLabel(s.maxD)}` : ` · as of ${dateLabel(s.asOf)}`}</span><button class="btn sm danger" data-act="del-sales" data-id="${s.id}">Remove</button></div>`).join('')}</div></div>` : ''}
     </div></div>
   </div>
+  <div class="note info"><span><b>Order sales reports</b> (daily sales and top state) are uploaded on the <a href="#sales">Sales page</a>.</span></div>
   ${mapCardHtml()}
   <div class="grid cols2">
   <div class="card"><header><div><h3>Recent inventory uploads</h3></div></header>
@@ -934,14 +937,16 @@ function buildMapIdx() {
 }
 const mapEntry = r => mapIdx.byUpc.get(normUpc(r.upc)) || mapIdx.byId.get(String(r.id)) || null;
 const mskuOf = r => mapEntry(r)?.sku || '';
+const mnameOf = r => mapEntry(r)?.nm || '';
+const mskuCell = r => mskuOf(r) ? `<span class="num">${esc(mskuOf(r))}</span>${mnameOf(r) ? `<div class="sub">${esc(mnameOf(r))}</div>` : ''}` : '<span class="chip y">Unmapped</span>';
 const hasMap = () => !!(S.map && S.map.rows.length);
 function mapCol() {
-  return hasMap() ? [{ h: 'Merchant SKU', v: r => mskuOf(r), f: r => mskuOf(r) ? `<span class="num">${esc(mskuOf(r))}</span>` : '<span class="chip y">Unmapped</span>' }] : [];
+  return hasMap() ? [{ h: 'Merchant SKU', v: r => mskuOf(r), f: mskuCell, wrap: true }] : [];
 }
 const MAP_FIELDS = {
   upc: ['upc', 'barcode', 'ean', 'gtin', 'upccode', 'eancode'],
   sku: ['merchantsku', 'sellersku', 'vendorsku', 'merchantskucode', 'skucode', 'sku', 'partnerskuid', 'skuid', 'merchantcode', 'articlecode', 'materialcode', 'itemcode'],
-  nm: ['merchantproductname', 'merchantskuname', 'productname', 'skuname', 'itemname', 'name', 'description'],
+  nm: ['merchantproductname', 'merchantskuname', 'productname', 'skuname', 'itemname', 'name', 'description', 'merchantskudescription', 'merchantitemname', 'skudescription', 'productdescription', 'skutitle', 'producttitle', 'title', 'merchantskuproductname'],
   id: ['blinkititemid', 'itemid', 'blinkitid']
 };
 function parseMapping(sheets, filename) {
@@ -998,6 +1003,8 @@ function mapCardHtml() {
   <div class="stack">${m ? `<div class="rowflex"><span class="chip g">${fmt(m.rows.length)} mappings</span><span class="chip">${esc(m.filename)}</span><span class="chip">${new Date(m.uploadedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span></div>
     ${snap ? `<div class="note ${un.length ? 'warn' : 'ok'}"><span>${fmt(items.length - un.length)} of ${fmt(items.length)} SKUs in the ${dateLabel(snap.date)} snapshot have a merchant SKU.${un.length ? ` ${fmt(un.length)} are unmapped.` : ''}</span></div>` : ''}
     ${un.length ? `<div class="rowflex">${un.slice(0, 6).map(r => `<span class="chip y">${esc(r.nm.slice(0, 26))} · ${esc(r.upc || r.id)}</span>`).join('')}${un.length > 6 ? `<span class="sub">+${un.length - 6} more</span>` : ''}</div><div class="rowflex"><button class="btn sm" data-act="unmapped-csv">Download unmapped list (CSV)</button></div>` : ''}
+    ${m.rows.some(r => r.nm) ? '' : '<div class="note warn"><span>This mapping has no product name column, so only the SKU code is shown. Add a "Merchant product name" column and upload again to show names.</span></div>'}
+    <div class="tablewrap"><table><thead><tr><th class="nosort">UPC</th><th class="nosort">Merchant SKU</th><th class="nosort">Product name</th></tr></thead><tbody>${m.rows.slice(0, 5).map(r => `<tr><td class="num">${esc(r.upc || '')}</td><td class="num">${esc(r.sku)}</td><td class="wrap">${esc(r.nm || '–')}</td></tr>`).join('')}</tbody></table></div>
     <div class="rowflex"><button class="btn sm danger" data-act="clear-map">Clear mapping</button></div>` : '<div class="empty"><b>No mapping uploaded</b>Merchant SKU columns appear across the dashboard once you upload one.</div>'}</div></div></div>`;
 }
 
@@ -1027,7 +1034,7 @@ function viewTop() {
   const body = rows.map(r => {
     const open = !!f.open[r.id], pos = Math.max(r.sel, 0) + Math.max(r.inc, 0), dInc = r.dem > 0 ? pos / r.dem : r.dem === 0 ? Infinity : null;
     let h = `<tr class="${r.id === sel?.id ? 'selrow' : ''}"><td><button class="btn sm" data-act="ts-open" data-id="${esc(r.id)}" aria-expanded="${open}" aria-label="Show warehouses for ${esc(r.nm)}">${open ? '▾' : '▸'} ${r.rank}</button></td>
-      <td class="wrap"><b>${esc(r.nm)}</b><div class="sub">${esc(r.br)}${r.uom ? ' · ' + esc(r.uom) : ''} · ${r.nw} warehouses</div></td><td class="num">${esc(r.upc)}</td>${hasMap() ? `<td>${mskuOf(r) ? `<span class="num">${esc(mskuOf(r))}</span>` : '<span class="chip y">Unmapped</span>'}</td>` : ''}
+      <td class="wrap"><b>${esc(r.nm)}</b><div class="sub">${esc(r.br)}${r.uom ? ' · ' + esc(r.uom) : ''} · ${r.nw} warehouses</div></td><td class="num">${esc(r.upc)}</td>${hasMap() ? `<td class="wrap">${mskuCell(r)}</td>` : ''}
       <td class="r"><b>${fmt(r.dUnits)}</b></td><td class="r">${fmt1(r.dem)}</td><td class="r"><b>${fmt(r.sel)}</b></td><td class="r">${r.inc > 0 ? `<span class="chip b">${fmt(r.inc)}</span>` : '0'}</td><td class="r">${fmt(pos)}</td>
       <td class="r">${daysTxt(r.days)}</td><td class="r">${daysTxt(dInc)}</td><td>${chipHtml(r.pstat)}</td></tr>`;
     if (open) {
@@ -1171,9 +1178,255 @@ document.addEventListener('change', e => {
 });
 document.addEventListener('input', e => { const t = e.target; if (t.dataset.w === 'q') { WF().q = t.value; rerenderSoon(); } });
 
+/* ---------- ORDER SALES REPORTS: daily sales + top state ---------- */
+/* Stored aggregated, not row by row:  sd = [date, state, orders, units, revenue]   si = [date, state, itemId, units, revenue]  */
+const emptyOrd = () => ({ sd: [], si: [], items: {}, files: [] });
+S.ord = emptyOrd();
+const ORD_FIELDS = {
+  oid: ['orderid', 'orderno', 'ordernumber', 'orderref'],
+  date: ['orderdate', 'saledate', 'date', 'ordereddate', 'deliverydate'],
+  item: ['itemid', 'productid', 'skuid', 'sku'],
+  nm: ['productname', 'itemname', 'name'], br: ['brandname', 'brand'],
+  state: ['customerstate', 'deliverystate', 'shippingstate', 'state'], sstate: ['supplystate', 'warehousestate'],
+  status: ['orderstatus', 'status'],
+  qty: ['quantity', 'qty', 'unitssold', 'units'],
+  amt: ['totalgrossbillamount', 'grossbillamount', 'grossamount', 'totalbillamount', 'gmv', 'netamount', 'totalamount']
+};
+const EXCL_STATUS = /cancel|return|refund|reject|fail|rto|undeliver/i;
+const inr = n => n == null || isNaN(n) ? '–' : '₹' + Math.round(n).toLocaleString('en-IN');
+const inrC = n => { if (n == null || isNaN(n)) return '–'; const a = Math.abs(n); return a >= 1e7 ? '₹' + (n / 1e7).toFixed(2) + ' Cr' : a >= 1e5 ? '₹' + (n / 1e5).toFixed(2) + ' L' : inr(n); };
+const pctTxt = n => n == null || !isFinite(n) ? '–' : (n >= 0 ? '+' : '') + (Math.round(n * 1000) / 10) + '%';
+const METRICS = { rev: ['Revenue'], o: ['Orders'], u: ['Units'] };
+const mFmt = (m, v) => m === 'rev' ? inr(v) : fmt(v);
+const mFmtC = (m, v) => m === 'rev' ? inrC(v) : fmt(v);
+const cleanState = s => String(s ?? '').replace(/\s+/g, ' ').trim();
+
+function parseOrders(sheets, filename) {
+  const res = { kind: 'orders', filename, issues: [], stats: {}, agg: null };
+  const found = findHeader(sheets, ORD_FIELDS, ['oid', 'date', 'qty', 'amt']);
+  if (!found) {
+    const looksInv = findHeader(sheets, INV_FIELDS, ['id', 'sel']);
+    res.fatal = looksInv ? 'This looks like an inventory (stock on hand) sheet, not a sales report. Upload it on the Upload page instead.' : 'Could not find the order columns. The report needs Order Id, Order Date, Quantity and Total Gross Bill Amount, plus Customer State (or Supply State).';
+    return res;
+  }
+  const { sheet, hi, map, header } = found;
+  if (map.state == null && map.sstate == null) { res.fatal = 'The report has no state column. Add Customer State (or Supply State) so sales can be ranked by state.'; return res; }
+  const stCol = map.state != null ? map.state : map.sstate, stName = header[stCol];
+  res.stateBasis = stName; res.map = Object.entries(map).map(([f, i]) => ({ field: f, header: header[i] })); res.sheetName = sheet.name;
+  const add = (sev, row, field, msg) => res.issues.push({ sev, row, field, msg });
+  const dayState = new Map(), itemAgg = new Map(), seen = new Set(), items = {};
+  let read = 0, valid = 0, errors = 0, warns = 0, excl = 0, dupl = 0, units = 0, rev = 0, minD = null, maxD = null, dm = false, fut = 0, noItem = 0; const orders = new Set(), exclStat = {};
+  for (let r = hi + 1; r < sheet.rows.length; r++) {
+    const raw = sheet.rows[r]; if (!raw || raw.every(x => x == null || x === '')) continue;
+    const xr = r + 1; read++; const g = f => map[f] != null ? raw[map[f]] : null; let bad = false;
+    const oid = String(g('oid') ?? '').trim(), pd = parseDateCell(g('date')), q = numFrom(g('qty')), a = numFrom(g('amt')), st = cleanState(raw[stCol]), item = String(g('item') ?? '').trim();
+    if (!oid) { add('error', xr, 'Order Id', 'Missing order id'); bad = true; }
+    if (!pd) { add('error', xr, 'Order Date', g('date') == null ? 'Missing date' : `Unreadable date "${g('date')}". Use YYYY-MM-DD or DD/MM/YYYY.`); bad = true; }
+    if (q == null) { add('error', xr, 'Quantity', g('qty') == null ? 'Missing quantity' : `Not a number: "${g('qty')}"`); bad = true; } else if (q < 0) { add('error', xr, 'Quantity', 'Negative quantity'); bad = true; }
+    if (a == null) { add('error', xr, 'Total Gross Bill Amount', g('amt') == null ? 'Missing amount' : `Not a number: "${g('amt')}"`); bad = true; } else if (a < 0) { add('error', xr, 'Total Gross Bill Amount', 'Negative amount'); bad = true; }
+    if (!st) { add('error', xr, stName, 'Missing state'); bad = true; }
+    if (bad) { errors++; continue; }
+    const status = String(g('status') ?? '').trim();
+    if (status && EXCL_STATUS.test(status)) { excl++; exclStat[status] = (exclStat[status] || 0) + 1; continue; }
+    const key = oid + '|' + item + '|' + (g('nm') ?? '');
+    if (seen.has(key)) { dupl++; warns++; if (dupl <= 20) add('warn', xr, 'Order Id', `Duplicate line for order ${oid}${item ? ' / item ' + item : ''}. Skipped.`); continue; }
+    seen.add(key);
+    if (pd.dm) dm = true; if (pd.d > todayStr()) fut++;
+    if (!item) noItem++;
+    const dk = pd.d + '\u0001' + st; let ds = dayState.get(dk); if (!ds) dayState.set(dk, ds = { d: pd.d, st, o: new Set(), u: 0, r: 0 });
+    ds.o.add(oid); ds.u += q; ds.r += a;
+    if (item) {
+      const ik = dk + '\u0001' + item; let ia = itemAgg.get(ik); if (!ia) itemAgg.set(ik, ia = { d: pd.d, st, id: item, u: 0, r: 0 });
+      ia.u += q; ia.r += a; if (!items[item]) items[item] = [String(g('nm') ?? '').trim(), String(g('br') ?? '').trim()];
+    }
+    orders.add(pd.d + '|' + oid); valid++; units += q; rev += a; if (!minD || pd.d < minD) minD = pd.d; if (!maxD || pd.d > maxD) maxD = pd.d;
+  }
+  if (!read) { res.fatal = 'The sheet has a header but no data rows.'; return res; }
+  if (dupl > 20) add('warn', '', 'Order Id', `${dupl - 20} more duplicate lines were skipped.`);
+  if (dm) { warns++; add('warn', '', 'Order Date', 'Some dates were read as day/month/year. Check the date range below is right.'); }
+  if (fut) { warns++; add('warn', '', 'Order Date', `${fut} lines have a date in the future.`); }
+  if (noItem) { warns++; add('warn', '', 'Item Id', `${noItem} lines have no item id, so they count in state totals but not in best sellers.`); }
+  if (minD && maxD && dayNum(maxD) - dayNum(minD) > 400) { warns++; add('warn', '', 'Order Date', `The dates span ${Math.round((dayNum(maxD) - dayNum(minD)) / 30)} months. Check this is the right file.`); }
+  res.agg = { sd: [...dayState.values()].map(x => [x.d, x.st, x.o.size, x.u, Math.round(x.r * 100) / 100]), si: [...itemAgg.values()].map(x => [x.d, x.st, x.id, x.u, Math.round(x.r * 100) / 100]), items };
+  const dates = new Set(res.agg.sd.map(x => x[0])), states = new Set(res.agg.sd.map(x => x[1]));
+  res.stats = { read, valid, errors, warnings: res.issues.filter(i => i.sev === 'warn').length, excluded: excl, exclStat, dupl, orders: orders.size, units, rev, minD, maxD, days: dates.size, states: states.size };
+  if (!valid) res.fatal = 'No valid order lines were found, so nothing can be saved. Check the error list.';
+  return res;
+}
+
+/* Decide, per date, whether the new file replaces what is stored. A day is only replaced when the file has at least as many orders. */
+function planOrders(agg) {
+  const have = new Map(); S.ord.sd.forEach(r => have.set(r[0], (have.get(r[0]) || 0) + r[2]));
+  const nu = new Map(); agg.sd.forEach(r => nu.set(r[0], (nu.get(r[0]) || 0) + r[2]));
+  const add = [], rep = [], keep = [];
+  [...nu.keys()].sort().forEach(d => { if (!have.has(d)) add.push(d); else if (nu.get(d) >= have.get(d)) rep.push(d); else keep.push({ d, old: have.get(d), nw: nu.get(d) }); });
+  return { add, rep, keep, nu, have };
+}
+async function saveOrders(p) {
+  const pl = planOrders(p.agg), skip = new Set(pl.keep.map(k => k.d)), drop = new Set(pl.rep);
+  S.ord.sd = S.ord.sd.filter(r => !drop.has(r[0])).concat(p.agg.sd.filter(r => !skip.has(r[0])));
+  S.ord.si = S.ord.si.filter(r => !drop.has(r[0])).concat(p.agg.si.filter(r => !skip.has(r[0])));
+  Object.assign(S.ord.items, p.agg.items);
+  const used = p.agg.sd.filter(r => !skip.has(r[0]));
+  S.ord.files.push({ id: uid(), name: p.filename, at: Date.now(), minD: p.stats.minD, maxD: p.stats.maxD, orders: used.reduce((s, r) => s + r[2], 0), rev: used.reduce((s, r) => s + r[4], 0), added: pl.add.length, replaced: pl.rep.length, kept: pl.keep.length });
+  S.ord.sd.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+  await Store.put('kv', S.ord, 'orders'); logAct(`Saved sales report ${p.filename}: ${pl.add.length} new days, ${pl.rep.length} replaced, ${pl.keep.length} kept`);
+  return pl;
+}
+
+/* ---------- filters and calculations ---------- */
+const OF = () => S.ui.of || (S.ui.of = { metric: 'rev', state: '', from: '', to: '' });
+const ordDates = () => [...new Set(S.ord.sd.map(r => r[0]))].sort();
+function ordCalc() {
+  const f = OF(), inR = d => (!f.from || d >= f.from) && (!f.to || d <= f.to);
+  const sd = S.ord.sd.filter(r => inR(r[0])), si = S.ord.si.filter(r => inR(r[0])), M = f.metric;
+  const byState = new Map(), byDayAll = new Map(), byDay = new Map();
+  for (const [d, st, o, u, r] of sd) {
+    let s = byState.get(st); if (!s) byState.set(st, s = { st, o: 0, u: 0, rev: 0, top: 0 }); s.o += o; s.u += u; s.rev += r;
+    let da = byDayAll.get(d); if (!da) byDayAll.set(d, da = { d, best: null, bv: -1 }); const v = M === 'rev' ? r : M === 'o' ? o : u; if (v > da.bv) { da.bv = v; da.best = st; }
+    if (!f.state || f.state === st) { let x = byDay.get(d); if (!x) byDay.set(d, x = { d, o: 0, u: 0, rev: 0 }); x.o += o; x.u += u; x.rev += r; }
+  }
+  const mk = M === 'rev' ? 'rev' : M === 'o' ? 'o' : 'u';
+  const states = [...byState.values()].sort((a, b) => b[mk] - a[mk]);
+  const days = [...byDay.values()].sort((a, b) => a.d < b.d ? -1 : 1);
+  byDayAll.forEach(da => { if (da.best) byState.get(da.best).top++; });
+  days.forEach(x => { x.aov = x.o ? x.rev / x.o : 0; x.top = byDayAll.get(x.d)?.best; });
+  const tot = states.reduce((a, s) => ({ o: a.o + s.o, u: a.u + s.u, rev: a.rev + s.rev }), { o: 0, u: 0, rev: 0 });
+  states.forEach((s, i) => { s.rank = i + 1; s.share = tot[mk] ? s[mk] / tot[mk] : 0; s.aov = s.o ? s.rev / s.o : 0; });
+  return { f, sd, si, states, days, tot, mk, M, nDays: byDayAll.size };
+}
+
+/* ---------- view ---------- */
+function ordUploadCard() {
+  if (!canEdit()) return '';
+  const u = S.up.ord, p = u?.parsed;
+  let pv = '';
+  if (u?.busy) pv = '<div class="note info">Reading file…</div>';
+  else if (p?.fatal) pv = `<div class="note crit"><span><b>${esc(u.file)}</b>: ${esc(p.fatal)}</span></div><div class="rowflex" style="margin-top:8px">${p.issues.length ? '<button class="btn sm" data-act="ord-issues">Download issue list (CSV)</button>' : ''}<button class="btn sm" data-act="ord-clear-up">Choose another file</button></div>`;
+  else if (p) {
+    const st = p.stats, pl = planOrders(p.agg), errs = p.issues.filter(i => i.sev === 'error'), lim = 60;
+    pv = `<div class="stack">
+      <div class="rowflex"><b>${esc(u.file)}</b><span class="chip">${esc(p.sheetName || '')}</span><span class="chip b">State from: ${esc(p.stateBasis)}</span></div>
+      <div class="rowflex"><span class="chip">${fmt(st.read)} lines read</span><span class="chip g">${fmt(st.valid)} valid</span><span class="chip ${st.errors ? 'r' : ''}">${fmt(st.errors)} errors</span><span class="chip ${st.warnings ? 'y' : ''}">${fmt(st.warnings)} warnings</span>${st.excluded ? `<span class="chip y">${fmt(st.excluded)} cancelled or returned, left out</span>` : ''}</div>
+      <div class="grid kpis"><div class="kpi"><span class="l">Dates</span><span class="v num" style="font-size:20px">${dateLabel(st.minD).slice(0, -5)} – ${dateLabel(st.maxD).slice(0, -5)}</span><span class="s">${st.days} day${st.days > 1 ? 's' : ''}</span></div>
+      <div class="kpi"><span class="l">Orders</span><span class="v num">${fmt(st.orders)}</span><span class="s">${fmt(st.units)} units</span></div>
+      <div class="kpi"><span class="l">Revenue</span><span class="v num">${inrC(st.rev)}</span><span class="s">${st.states} states</span></div></div>
+      <div class="note ${pl.keep.length ? 'warn' : 'info'}" style="flex-direction:column"><b>What saving will do</b>
+        <span>${pl.add.length} new day${pl.add.length === 1 ? '' : 's'} added${pl.rep.length ? `, ${pl.rep.length} existing day${pl.rep.length === 1 ? '' : 's'} refreshed with this file (${pl.rep.slice(0, 4).map(d => dateLabel(d).slice(0, -5)).join(', ')}${pl.rep.length > 4 ? '…' : ''}). Totals are replaced, never added twice` : ''}.</span>
+        ${pl.keep.length ? `<span><b>${pl.keep.length} day${pl.keep.length === 1 ? '' : 's'} kept as stored</b> because this file has fewer orders than you already have: ${pl.keep.slice(0, 4).map(k => `${dateLabel(k.d).slice(0, -5)} (${fmt(k.nw)} vs ${fmt(k.old)})`).join(', ')}${pl.keep.length > 4 ? '…' : ''}.</span>` : ''}</div>
+      <details><summary class="sub" style="cursor:pointer">Columns detected</summary><div class="rowflex" style="margin-top:8px">${p.map.map(m => `<span class="chip">${esc(m.field)} ← ${esc(m.header)}</span>`).join('')}</div></details>
+      ${p.issues.length ? `<details ${errs.length ? 'open' : ''}><summary style="cursor:pointer;font-weight:600">Validation details (${p.issues.length})</summary><div class="tablewrap" style="margin-top:8px;max-height:240px;overflow:auto"><table><thead><tr><th class="nosort">Row</th><th class="nosort">Level</th><th class="nosort">Field</th><th class="nosort">Issue</th></tr></thead><tbody>${p.issues.slice(0, lim).map(i => `<tr><td>${i.row}</td><td><span class="chip ${i.sev === 'error' ? 'r' : 'y'}">${i.sev}</span></td><td>${esc(i.field)}</td><td class="wrap">${esc(i.msg)}</td></tr>`).join('')}</tbody></table></div><div class="rowflex" style="margin-top:8px"><span class="sub">${p.issues.length > lim ? `Showing first ${lim}. ` : ''}</span><button class="btn sm" data-act="ord-issues">Download issue list (CSV)</button></div></details>` : '<div class="note ok">No problems found.</div>'}
+      <div class="rowflex"><button class="btn primary" data-act="ord-save" ${pl.add.length + pl.rep.length ? '' : 'disabled'}>Save sales report${st.errors ? ` (skip ${fmt(st.errors)} lines with errors)` : ''}</button><button class="btn" data-act="ord-clear-up">Cancel</button></div></div>`;
+  }
+  const files = S.ord.files.slice(-5).reverse();
+  return `<div class="card"><header><div><h3>Upload sales report</h3><p>Upload whenever you have a new report. Each day is stored once, so overlapping files never double count.</p></div></header><div class="stack">
+    ${dropHtml('ord', 'Upload sales report (Excel or CSV)')}
+    <div class="sub">Needs Order Id, Order Date, Quantity and Total Gross Bill Amount, plus Customer State. The Blinkit "Sales Summary" export works as is. Cancelled or returned orders are left out.</div>
+    <div id="pv-ord">${pv}</div>
+    ${files.length ? `<details><summary class="sub" style="cursor:pointer">Recent sales uploads (${S.ord.files.length})</summary><div class="tablewrap" style="margin-top:8px"><table><thead><tr><th class="nosort">File</th><th class="nosort">Dates</th><th class="nosort r">Orders</th><th class="nosort r">Revenue</th><th class="nosort">Uploaded</th></tr></thead><tbody>${files.map(x => `<tr><td class="wrap">${esc(x.name)}</td><td>${dateLabel(x.minD).slice(0, -5)} – ${dateLabel(x.maxD).slice(0, -5)}</td><td class="r">${fmt(x.orders)}</td><td class="r">${inr(x.rev)}</td><td>${new Date(x.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td></tr>`).join('')}</tbody></table></div>${S.ord.sd.length ? '<div class="rowflex" style="margin-top:8px"><button class="btn sm danger" data-act="ord-wipe">Erase all sales report data</button></div>' : ''}</details>` : ''}
+  </div></div>`;
+}
+function viewSales() {
+  const up = ordUploadCard();
+  if (!S.ord.sd.length) return `${up}<div class="card"><div class="empty"><b>No sales reports yet</b>${canEdit() ? 'Upload a sales report above to see daily sales and the top-performing state.' : 'Sales reports have not been published yet.'}</div></div>`;
+  const c = ordCalc(), f = c.f, M = c.M, top = c.states[0], second = c.states[1], dates = ordDates(), allStates = [...new Set(S.ord.sd.map(r => r[1]))].sort();
+  const label = METRICS[M][0].toLowerCase();
+  const lastDay = c.days[c.days.length - 1], prevDay = c.days[c.days.length - 2], dRev = lastDay && prevDay && prevDay.rev ? (lastDay.rev - prevDay.rev) / prevDay.rev : null;
+  const best = c.days.length ? c.days.reduce((a, b) => b.rev > a.rev ? b : a) : null;
+  const ft = c.days.reduce((a, d) => ({ o: a.o + d.o, u: a.u + d.u, rev: a.rev + d.rev }), { o: 0, u: 0, rev: 0 });
+  const range = c.days.length ? `${dateLabel(c.days[0].d).slice(0, -5)} – ${dateLabel(lastDay.d).slice(0, -5)}` : 'no days in range';
+  const quick = (k, t) => `<button data-act="o-range" data-v="${k}" aria-pressed="${f.preset === k}">${t}</button>`;
+  const hero = top ? `<div class="card" style="border-color:var(--green);background:linear-gradient(135deg,var(--green-soft),var(--surface) 70%)"><div class="rowflex" style="justify-content:space-between;align-items:flex-start;gap:16px">
+      <div style="min-width:0"><span class="chip g">Top-performing state · by ${label}</span>
+        <div style="font-family:var(--font-head);font-size:34px;font-weight:800;line-height:1.1;margin:8px 0 4px">${esc(top.st)}</div>
+        <div class="sub">${fmt1(top.share * 100)}% of all ${label === 'revenue' ? 'revenue' : label} · top state on ${top.top} of ${c.nDays} days${second ? ` · ${mFmtC(M, top[c.mk] - second[c.mk])} ahead of ${esc(second.st)}` : ''}</div></div>
+      <div class="rowflex" style="gap:22px"><div><div class="sub">Revenue</div><b class="num" style="font-size:20px">${inrC(top.rev)}</b></div><div><div class="sub">Orders</div><b class="num" style="font-size:20px">${fmt(top.o)}</b></div><div><div class="sub">Units</div><b class="num" style="font-size:20px">${fmt(top.u)}</b></div><div><div class="sub">Avg order</div><b class="num" style="font-size:20px">${inr(top.aov)}</b></div></div></div>
+      ${c.states.length > 1 ? `<div class="rowflex" style="margin-top:12px">${c.states.slice(1, 4).map(s => `<span class="chip">#${s.rank} ${esc(s.st)} · ${mFmtC(M, s[c.mk])}</span>`).join('')}</div>` : ''}</div>` : '';
+  const dayCols = [
+    { h: 'Date', v: r => r.d, f: r => `<b>${dateLabel(r.d)}</b>` }, { h: 'Revenue', v: r => r.rev, f: r => inr(r.rev), r: 1 }, { h: 'Orders', v: r => r.o, f: r => fmt(r.o), r: 1 }, { h: 'Units', v: r => r.u, f: r => fmt(r.u), r: 1 }, { h: 'Avg order', v: r => r.aov, f: r => inr(r.aov), r: 1 },
+    { h: 'vs previous day', v: r => r.chg ?? -Infinity, f: r => r.chg == null ? '–' : `<span class="chip ${r.chg >= 0 ? 'g' : 'r'}">${pctTxt(r.chg)}</span>`, r: 1 }, { h: 'Top state', v: r => r.top || '', f: r => r.top ? esc(r.top) : '–' }];
+  c.days.forEach((d, i) => { d.chg = i && c.days[i - 1].rev ? (d.rev - c.days[i - 1].rev) / c.days[i - 1].rev : null; });
+  const stCols = [
+    { h: '#', v: r => r.rank, f: r => r.rank === 1 ? `<span class="chip g">1</span>` : r.rank }, { h: 'State', v: r => r.st, f: r => `<b>${esc(r.st)}</b>` }, { h: 'Revenue', v: r => r.rev, f: r => inr(r.rev), r: 1 }, { h: 'Share', v: r => r.share, f: r => `${fmt1(r.share * 100)}%`, r: 1 },
+    { h: 'Orders', v: r => r.o, f: r => fmt(r.o), r: 1 }, { h: 'Units', v: r => r.u, f: r => fmt(r.u), r: 1 }, { h: 'Avg order', v: r => r.aov, f: r => inr(r.aov), r: 1 }, { h: 'Days on top', v: r => r.top, f: r => r.top ? fmt(r.top) : '–', r: 1 }];
+  const dts = ts('o-day'); if (dts.sort == null) { dts.sort = 0; dts.dir = -1; }
+  const topItems = top ? bestItems(c.si, top.st, 8) : [];
+  return `${up}
+  <div class="card"><div class="filters" style="margin:0;align-items:end">
+    <div class="field"><label>Rank states by</label><div class="seg">${Object.entries(METRICS).map(([k, [t]]) => `<button data-act="o-metric" data-v="${k}" aria-pressed="${M === k}">${t}</button>`).join('')}</div></div>
+    <div class="field"><label>Period</label><div class="seg">${quick('all', 'All days')}${quick('7', 'Last 7 days')}${quick('14', 'Last 14 days')}</div></div>
+    <div class="field"><label for="o-from">From</label><input id="o-from" type="date" data-o="from" value="${esc(f.from)}" min="${dates[0]}" max="${dates[dates.length - 1]}"></div>
+    <div class="field"><label for="o-to">To</label><input id="o-to" type="date" data-o="to" value="${esc(f.to)}" min="${dates[0]}" max="${dates[dates.length - 1]}"></div>
+    <div class="field"><label for="o-state">Daily view for</label><select id="o-state" data-o="state"><option value="">All states</option>${allStates.map(s => `<option ${f.state === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></div>
+  </div></div>
+  ${hero || `<div class="note warn">No sales fall in the selected dates.</div>`}
+  <div class="grid kpis">
+    <div class="kpi"><span class="l">Revenue${f.state ? ' · ' + esc(f.state) : ''}</span><span class="v num">${inrC(ft.rev)}</span><span class="s">${range}</span></div>
+    <div class="kpi"><span class="l">Orders</span><span class="v num">${fmt(ft.o)}</span><span class="s">${fmt(ft.u)} units · avg order ${inr(ft.o ? ft.rev / ft.o : 0)}</span></div>
+    <div class="kpi"><span class="l">Latest day</span><span class="v num">${lastDay ? inrC(lastDay.rev) : '–'}</span><span class="s">${lastDay ? dateLabel(lastDay.d) : ''}${dRev != null ? ` · ${pctTxt(dRev)} vs previous day` : ''}</span></div>
+    <div class="kpi"><span class="l">Best day</span><span class="v num">${best ? inrC(best.rev) : '–'}</span><span class="s">${best ? dateLabel(best.d) + ' · ' + fmt(best.o) + ' orders' : ''}</span></div>
+  </div>
+  <div class="grid cols2">
+    ${chartCard('Daily sales', `${f.state ? esc(f.state) : 'All states'} · ${METRICS[M][0].toLowerCase()} per day`, 'ch-od')}
+    ${chartCard('Sales by state', `Top 12 states by ${label}. The leading state is highlighted`, 'ch-os')}
+  </div>
+  <div class="card"><header><div><h3>Daily sales</h3><p>${f.state ? esc(f.state) : 'All states'} · tap a heading to sort</p></div><button class="btn sm" data-act="o-export-day">Download CSV</button></header>${tableHtml('o-day', dayCols, c.days, dts)}</div>
+  <div class="card"><header><div><h3>State ranking</h3><p>Ranked by ${label} for ${range}</p></div><button class="btn sm" data-act="o-export-st">Download CSV</button></header>${tableHtml('o-st', stCols, c.states, ts('o-st'))}</div>
+  ${topItems.length ? `<div class="card"><header><div><h3>Best sellers in ${esc(top.st)}</h3><p>Top products by ${M === 'u' ? 'units' : 'revenue'} in the selected dates</p></div></header><div class="tablewrap"><table><thead><tr><th class="nosort">#</th><th class="nosort">Product</th><th class="nosort">Item ID</th><th class="nosort r">Units</th><th class="nosort r">Revenue</th></tr></thead><tbody>${topItems.map((x, i) => `<tr><td>${i + 1}</td><td class="wrap"><b>${esc(x.nm || 'Item ' + x.id)}</b><div class="sub">${esc(x.br)}</div></td><td class="num">${esc(x.id)}</td><td class="r">${fmt(x.u)}</td><td class="r">${inr(x.r)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
+  <p class="sub">Revenue is the Total Gross Bill Amount of delivered orders. States come from the customer state in each report. ${fmt(S.ord.sd.reduce((s, r) => s + r[2], 0))} orders stored across ${dates.length} days.</p>`;
+}
+function bestItems(si, state, n) {
+  const m = new Map(); si.filter(r => r[1] === state).forEach(r => { let x = m.get(r[2]); if (!x) m.set(r[2], x = { id: r[2], nm: S.ord.items[r[2]]?.[0], br: S.ord.items[r[2]]?.[1] || '', u: 0, r: 0 }); x.u += r[3]; x.r += r[4]; });
+  return [...m.values()].sort((a, b) => OF().metric === 'u' ? b.u - a.u : b.r - a.r).slice(0, n);
+}
+function chartsSales() {
+  if (!S.ord.sd.length || !$('#ch-od')) return; const c = ordCalc(), M = c.M, key = M === 'rev' ? 'rev' : M === 'o' ? 'o' : 'u';
+  drawChart('ch-od', { type: 'bar', data: { labels: c.days.map(d => dateLabel(d.d).slice(0, -5)), datasets: [{ label: METRICS[M][0], data: c.days.map(d => d[key]), backgroundColor: css('--chart1'), borderRadius: 3 }] }, options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: x => ' ' + mFmt(M, x.parsed.y) } } } } });
+  const rows = c.states.slice(0, 12); $('#ch-os').parentElement.style.height = Math.max(240, rows.length * 26 + 60) + 'px';
+  drawChart('ch-os', { type: 'bar', data: { labels: rows.map(s => s.st), datasets: [{ label: METRICS[M][0], data: rows.map(s => s[c.mk]), backgroundColor: rows.map((s, i) => i === 0 ? css('--chart2') : css('--chart1')), borderRadius: 3 }] }, options: { indexAxis: 'y', plugins: { legend: { display: false }, tooltip: { callbacks: { label: x => ' ' + mFmt(M, x.parsed.x) } } }, scales: { x: { grid: { color: css('--grid') }, beginAtZero: true }, y: { grid: { display: false } } } } });
+}
+
+/* ---------- actions ---------- */
+async function handleOrdFile(file) {
+  if (!file || !canEdit()) return;
+  S.up.ord = { file: file.name, busy: true }; render();
+  try { const sheets = await readFileRows(file); S.up.ord = { file: file.name, parsed: parseOrders(sheets, file.name) }; }
+  catch (e) { S.up.ord = { file: file.name, parsed: { fatal: 'This file could not be read. Use .xlsx, .xls or .csv. (' + (e.message || e) + ')', issues: [], stats: {} } }; }
+  render();
+}
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.dataset.file === 'ord') { handleOrdFile(t.files[0]); return; }
+  if (t.dataset.o) { const f = OF(); f[t.dataset.o] = t.value; if (t.dataset.o !== 'state') f.preset = ''; ts('o-day').page = 0; render(); }
+});
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]'); if (!b || !/^(o-|ord-)/.test(b.dataset.act)) return; const a = b.dataset.act, v = b.dataset.v, f = OF();
+  if (a === 'o-metric') { f.metric = v; render(); }
+  else if (a === 'o-range') { const ds = ordDates(); f.preset = v; if (v === 'all') { f.from = ''; f.to = ''; } else { const last = ds[ds.length - 1]; f.to = ''; f.from = ds[Math.max(0, ds.length - +v)] || ''; } ts('o-day').page = 0; render(); }
+  else if (a === 'o-export-day') { const c = ordCalc(); await saveFile('daily-sales.csv', toCsv(['Date', 'Revenue', 'Orders', 'Units', 'Avg order value', 'Change vs previous day', 'Top state'], c.days.map(d => [d.d, Math.round(d.rev), d.o, d.u, Math.round(d.aov), d.chg == null ? '' : Math.round(d.chg * 1000) / 10 + '%', d.top || '']))); }
+  else if (a === 'o-export-st') { const c = ordCalc(); await saveFile('sales-by-state.csv', toCsv(['Rank', 'State', 'Revenue', 'Share', 'Orders', 'Units', 'Avg order value', 'Days on top'], c.states.map(s => [s.rank, s.st, Math.round(s.rev), Math.round(s.share * 1000) / 10 + '%', s.o, s.u, Math.round(s.aov), s.top]))); }
+  else if (!canEdit()) { toast('Admin sign-in required'); }
+  else if (a === 'ord-clear-up') { S.up.ord = null; render(); }
+  else if (a === 'ord-issues') { const p = S.up.ord?.parsed; if (p) await saveFile('sales-validation-issues.csv', toCsv(['Row', 'Level', 'Field', 'Issue'], p.issues.map(i => [i.row, i.sev, i.field, i.msg]))); }
+  else if (a === 'ord-save') { const p = S.up.ord?.parsed; if (!p || p.fatal) return; const pl = await saveOrders(p); S.up.ord = null; f.from = ''; f.to = ''; f.preset = 'all'; toast(`Saved: ${pl.add.length} new day${pl.add.length === 1 ? '' : 's'}${pl.rep.length ? `, ${pl.rep.length} refreshed` : ''}`); render(); }
+  else if (a === 'ord-wipe') { if (!armed(b, 'Confirm erase sales data?')) return; S.ord = emptyOrd(); await Store.put('kv', S.ord, 'orders'); logAct('Erased all sales report data'); toast('Sales report data erased'); render(); }
+});
+
+/* ---------- screen mode: day / night / auto ---------- */
+const THEMES = [['light', 'Day', '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'], ['dark', 'Night', '<path d="M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10z"/>'], ['auto', 'Auto', '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>']];
+function getTheme() { try { const t = localStorage.getItem('soh-theme'); return t === 'light' || t === 'dark' ? t : 'auto'; } catch (e) { return S.ui.theme || 'auto'; } }
+function applyTheme(t) { S.ui.theme = t; const el = document.documentElement; if (t === 'auto') el.removeAttribute('data-theme'); else el.setAttribute('data-theme', t); }
+function setTheme(t) { try { if (t === 'auto') localStorage.removeItem('soh-theme'); else localStorage.setItem('soh-theme', t); } catch (e) { } applyTheme(t); render(); }
+function themeSeg() {
+  const cur = getTheme();
+  return `<div class="seg nw" role="group" aria-label="Screen mode">${THEMES.map(([k, l, ic]) => `<button data-act="theme-set" data-v="${k}" aria-pressed="${cur === k}" title="${l} mode${k === 'auto' ? ' (follows your device)' : ''}" style="display:inline-flex;align-items:center;gap:5px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ic}</svg>${l}</button>`).join('')}</div>`;
+}
+applyTheme(getTheme());
+document.addEventListener('click', e => { const b = e.target.closest('[data-act="theme-set"]'); if (b) setTheme(b.dataset.v); });
+
 /* ---------- render + router ---------- */
-const VIEWS = { dashboard: viewDashboard, 'top-sellers': viewTop, warehouses: viewWarehouses, upload: viewUpload, history: viewHistory, compare: viewCompare, planning: viewPlanning };
-const AFTER = { dashboard: chartsDashboard, 'top-sellers': chartsTop, history: chartsHistory, compare: chartsCompare };
+const VIEWS = { dashboard: viewDashboard, 'top-sellers': viewTop, sales: viewSales, warehouses: viewWarehouses, upload: viewUpload, history: viewHistory, compare: viewCompare, planning: viewPlanning };
+const AFTER = { dashboard: chartsDashboard, 'top-sellers': chartsTop, sales: chartsSales, history: chartsHistory, compare: chartsCompare };
 function render() {
   const a = document.activeElement, fid = a && a.id && /^(f-q|f-sku|c-q|p-q|t-q|w-q)$/.test(a.id) ? a.id : null, pos = fid ? a.selectionStart : null;
   const y = window.scrollY;
@@ -1241,8 +1494,8 @@ document.addEventListener('click', async e => {
     case 'exp-plan': { const f = PF(), rows = enrich(aggregate(rowsOf(snap), f.level), f.level), st = S.settings;
       await exportTable(`replenishment-plan-${snap.date}`, ['SKU', 'Product', 'Warehouse', 'Stock', 'Incoming', `Avg daily sales (${st.windowDays}d)`, 'Demand source', 'Days of stock', 'Lead time (d)', 'Safety (d)', 'Reorder point', 'Target stock', 'Suggested order', 'Status'],
         rows.map(r => [r.id, r.nm, f.level === 'skuwh' ? r.wn : 'All', r.sel, r.inc, r.dem == null ? 'No data' : Math.round(r.dem * 100) / 100, r.demSrc, r.days == null ? 'No data' : r.days === Infinity ? 'No sales' : Math.round(r.days * 10) / 10, r.lead, r.safe, r.rop ?? '', r.target ?? '', r.sugg ?? 'No data', STAT[r.pstat][0]]), v); break; }
-    case 'backup': await saveFile(`soh-backup-${todayStr()}.json`, JSON.stringify({ app: 'soh-tracker', v: 1, snaps: S.snaps, sales: S.sales, settings: S.settings })); break;
-    case 'wipe': if (!armed(b, 'Confirm erase everything?')) return; S.snaps = []; S.sales = []; S.map = null; S.ui.snapId = null; await Store.clear('snaps'); await Store.clear('sales'); await Store.put('kv', null, 'skumap'); await Store.put('kv', true, 'seeded'); buildSalesIdx(); buildMapIdx(); logAct('Erased all data'); toast('All data erased'); render(); break;
+    case 'backup': await saveFile(`soh-backup-${todayStr()}.json`, JSON.stringify({ app: 'soh-tracker', v: 1, snaps: S.snaps, sales: S.sales, ord: S.ord, settings: S.settings })); break;
+    case 'wipe': if (!armed(b, 'Confirm erase everything?')) return; S.snaps = []; S.sales = []; S.map = null; S.ord = emptyOrd(); await Store.put('kv', S.ord, 'orders'); S.ui.snapId = null; await Store.clear('snaps'); await Store.clear('sales'); await Store.put('kv', null, 'skumap'); await Store.put('kv', true, 'seeded'); buildSalesIdx(); buildMapIdx(); logAct('Erased all data'); toast('All data erased'); render(); break;
   }
 });
 
@@ -1281,6 +1534,7 @@ async function restore(file) {
     const j = JSON.parse(await file.text()); if (j.app !== 'soh-tracker') throw new Error('Not a backup from this dashboard');
     for (const s of j.snaps || []) { if (!snapById(s.id)) S.snaps.push(s); await Store.put('snaps', s); }
     for (const s of j.sales || []) { if (!S.sales.find(x => x.id === s.id)) S.sales.push(s); await Store.put('sales', s); }
+    if (j.ord && j.ord.sd) { S.ord = { sd: j.ord.sd, si: j.ord.si || [], items: j.ord.items || {}, files: j.ord.files || [] }; await Store.put('kv', S.ord, 'orders'); }
     if (j.settings) { S.settings = { ...DEFAULTS, ...j.settings, whStatus: { ...(j.settings.whStatus || {}) } }; S.whVer++; metaCache.clear(); await Store.put('kv', S.settings, 'settings'); }
     buildSalesIdx(); toast(`Restored ${(j.snaps || []).length} snapshots`); render();
   } catch (e) { toast('Restore failed: ' + e.message); }
@@ -1359,7 +1613,7 @@ function adminLogout() {
   if (S.mode === 'published') loadBase(); S.up = { inv: null, sales: null }; toast('Signed out'); render();
 }
 const b64 = str => { const bytes = new TextEncoder().encode(str); let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(bin); };
-const bundleBody = () => { const settings = {}; PLAN_KEYS.forEach(k => settings[k] = S.settings[k]); return { snaps: S.snaps.map(packSnap), sales: S.sales, map: S.map, settings, auth: { users: S.authUsers } }; };
+const bundleBody = () => { const settings = {}; PLAN_KEYS.forEach(k => settings[k] = S.settings[k]); return { snaps: S.snaps.map(packSnap), sales: S.sales, map: S.map, ord: S.ord, settings, auth: { users: S.authUsers } }; };
 async function publishNow(why) {
   if (!S.ghToken || !canEdit()) return;
   if (S.pubBusy) { S.pubAgain = true; return; }
@@ -1383,21 +1637,21 @@ const schedAuto = debounce(() => publishNow('auto'), 3000);
 /* published data (read-only for visitors) */
 function loadBase() {
   const b = S.published;
-  S.snaps = (b.snaps || []).map(unpackSnap); S.sales = b.sales || []; S.map = b.map || null; S.authUsers = [...(b.auth?.users || [])];
+  S.snaps = (b.snaps || []).map(unpackSnap); S.sales = b.sales || []; S.map = b.map || null; S.ord = b.ord && b.ord.sd ? { sd: b.ord.sd, si: b.ord.si || [], items: b.ord.items || {}, files: b.ord.files || [] } : emptyOrd(); S.authUsers = [...(b.auth?.users || [])];
   S.settings = { ...DEFAULTS, ...(b.settings || {}), overrides: { ...(b.settings?.overrides || {}) }, whStatus: { ...(b.settings?.whStatus || {}) }, includeShut: false };
   S.ui.snapId = null; S.dirty = false; S.whVer++; metaCache.clear(); buildMapIdx(); buildSalesIdx();
 }
 async function tryDraft() {
   const d = await Store.getKv('draft');
   if (d && d.base === S.published.publishedAt) {
-    S.snaps = d.snaps.map(unpackSnap); S.sales = d.sales || []; S.map = d.map || null; if (d.auth) S.authUsers = d.auth;
+    S.snaps = d.snaps.map(unpackSnap); S.sales = d.sales || []; S.map = d.map || null; S.ord = d.ord && d.ord.sd ? d.ord : emptyOrd(); if (d.auth) S.authUsers = d.auth;
     S.settings = { ...DEFAULTS, ...d.settings, overrides: { ...(d.settings?.overrides || {}) }, whStatus: { ...(d.settings?.whStatus || {}) } };
     S.dirty = true; S.whVer++; metaCache.clear(); buildMapIdx(); buildSalesIdx();
   }
 }
 const saveDraft = debounce(async () => {
   if (S.mode !== 'published' || !S.admin) return; S.dirty = true;
-  try { await Store.put('kv', { base: S.published.publishedAt, savedAt: Date.now(), snaps: S.snaps.map(packSnap), sales: S.sales, map: S.map, auth: S.authUsers, settings: S.settings }, 'draft'); } catch (e) { }
+  try { await Store.put('kv', { base: S.published.publishedAt, savedAt: Date.now(), snaps: S.snaps.map(packSnap), sales: S.sales, map: S.map, ord: S.ord, auth: S.authUsers, settings: S.settings }, 'draft'); } catch (e) { }
   renderTop(); if (S.autoPub && S.ghToken) schedAuto();
 }, 300);
 /* wrong-file review for inventory uploads */
@@ -1476,7 +1730,7 @@ document.addEventListener('submit', async e => {
   if (id === 'login-form') { e.preventDefault(); const m = $('#login-form-msg'); m.textContent = 'Checking…'; const err = await loginWithPassword($('#lg-user').value, $('#lg-pass').value); if (err) m.textContent = err; else { toast('Signed in'); render(); } return; }
   if (id === 'logins-form') {
     e.preventDefault(); if (!canEdit() || !S.ghToken) return; const m = $('#lg-msg'), u = $('#lg-u').value.trim().toLowerCase(), p1 = $('#lg-p1').value, p2 = $('#lg-p2').value;
-    if (!/^[a-z0-9._-]{3,30}$/.test(u)) { m.textContent = 'Username: 3 to 30 letters, numbers, dots, dashes or underscores.'; return; }
+    if (!/^[a-z0-9._@+-]{3,60}$/.test(u)) { m.textContent = 'Username: 3 to 60 characters. Letters, numbers and . _ - @ + only. An email address works.'; return; }
     if (p1.length < 10) { m.textContent = 'Use at least 10 characters.'; return; } if (p1 !== p2) { m.textContent = 'The two passwords do not match.'; return; }
     if (!(window.crypto && crypto.subtle)) { m.textContent = 'This browser cannot encrypt here. Open the site over https.'; return; }
     m.textContent = 'Creating… (a few seconds)'; const rec = await makeLogin(u, p1, { token: S.ghToken, repo: S.ghRepo });
@@ -1520,6 +1774,7 @@ async function boot() {
       if (S.ghToken) { S.admin = true; await tryDraft(); }
     } else {
       S.snaps = await Store.all('snaps'); S.sales = await Store.all('sales'); S.authUsers = (await Store.getKv('authusers')) || []; 
+      const od = await Store.getKv('orders'); if (od && od.sd) S.ord = od;
       const mp = await Store.getKv('skumap'); if (mp && mp.rows) S.map = mp;
       const st = await Store.getKv('settings'); S.settings.whStatus = {};
       if (st) S.settings = { ...DEFAULTS, ...st, overrides: st.overrides || {}, whStatus: { ...(st.whStatus || {}) } };
